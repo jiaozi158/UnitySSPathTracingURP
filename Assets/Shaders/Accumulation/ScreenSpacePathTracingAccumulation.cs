@@ -60,7 +60,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
         // Reset the accumulation when scene has changed.
         // This is not perfect because we cannot detect per mesh changes or per light changes.
-        // (Reject history samples in accumulation shader according to per object motion vetors?)
+        // (Reject history samples in accumulation shader according to per object motion vectors?)
         private Matrix4x4 prevCamWorldMatrix;
         private Matrix4x4 prevCamHClipMatrix;
         private NativeArray<VisibleLight> prevLightsList;
