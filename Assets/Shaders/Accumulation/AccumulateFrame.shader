@@ -6,7 +6,7 @@ Shader "Hidden/AccumulateFrame"
 		[HideInInspector] _Sample("Total Sample", Float) = 0.0
 	}
 
-	// TODO: Reject or reporject history samples according to per object motion vetors?
+	// TODO: Reject or reproject history samples according to per object motion vectors?
 
 	SubShader
 	{
@@ -17,7 +17,7 @@ Shader "Hidden/AccumulateFrame"
 		Pass
 		{
 			Name "Accumulation"
-		    Tags { "LightMode" = "Accumulation" }
+		        Tags { "LightMode" = "Accumulation" }
 
 			HLSLPROGRAM
 			#pragma vertex vert
