@@ -207,7 +207,7 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
 
     float lastDepthDiff = 0.0;
     //float2 lastRayPositionNDC = float2(0.0, 0.0);
-    float3 lastRatPositionWS = float3(0.0, 0.0, 0.0);
+    float3 lastRayPositionWS = float3(0.0, 0.0, 0.0);
     bool startBinarySearch = false;
     UNITY_LOOP
     for (int i = 1; i <= MAX_STEP; i++)
@@ -264,7 +264,7 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
             {
                 // Seems that interpolating screenUV is giving worse results, so do it for positionWS only.
                 //rayPositionNDC.xy = lerp(lastRayPositionNDC, rayPositionNDC.xy, lastDepthDiff / (lastDepthDiff - depthDiff));
-                rayHit.position = lerp(lastRatPositionWS, rayHit.position, lastDepthDiff / (lastDepthDiff - depthDiff));
+                rayHit.position = lerp(lastRayPositionWS, rayHit.position, lastDepthDiff / (lastDepthDiff - depthDiff));
             }
 
             HitSurfaceDataFromGBuffer(rayPositionNDC.xy, rayHit.albedo, rayHit.specular, rayHit.normal, rayHit.emission, rayHit.smoothness);
@@ -274,7 +274,7 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
         // Update last step's depth difference.
         lastDepthDiff = depthDiff;
         //lastRayPositionNDC = rayPositionNDC.xy;
-        lastRatPositionWS = rayPositionWS.xyz;
+        lastRayPositionWS = rayPositionWS.xyz;
     }
     return rayHit;
 }
