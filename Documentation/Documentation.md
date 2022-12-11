@@ -27,7 +27,7 @@ Ray Marching Quality: Low should be enough for small scenes.
 
 Dithering: Dithering can reduce the banding artifacts in sharp reflections.
 
-Use Reflection Probe Instead: Using Reflection Probe as the environment lighting. (The probe is using infinite projection currently)
+**Unfinished:** Use Reflection Probe Instead: Using Reflection Probe as the environment lighting. (The probe is using infinite projection currently)
 
 Ignore deferred 0 smoothness: Enable this to fix forward objects' rendering artifacts in deferred, but will require all (deferred) materials to have non-0 smoothness. (0.01 and above)
 
