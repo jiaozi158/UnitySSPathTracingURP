@@ -122,7 +122,7 @@ Material:
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
     - _Surface: 0
-    - _USE_REFLECTION_PROBE: 1
+    - _USE_REFLECTION_PROBE: 0
     - _WorkflowMode: 1
     - _ZWrite: 1
     m_Colors:
