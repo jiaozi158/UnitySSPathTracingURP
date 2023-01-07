@@ -330,14 +330,13 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
         // Roulette-select the ray's path.
         half roulette = random.z;
 
+        // Fresnel effect
+        half fresnel = F_Schlick(0.04, max(rayHit.smoothness, 0.04), saturate(dot(rayHit.normal, ray.direction)));
 
-        float fresnel = F_Schlick(0.04, max(rayHit.smoothness, 0.04), saturate(dot(rayHit.normal, ray.direction)));
         if (specChance > 0 && roulette < specChance + fresnel)
         {
             // Specular reflection
             rayHit.specular = lerp(rayHit.albedo, rayHit.specular, rayHit.specular.r);
-            // Fresnel effect
-            //rayHit.smoothness = F_Schlick(0.04, rayHit.smoothness, saturate(dot(rayHit.normal, ray.direction)));
             ray.position = rayHit.position + rayHit.normal * RAY_BIAS;
             ray.direction = normalize(lerp(SampleHemisphereCosine(random.x, random.y, reflect(ray.direction, rayHit.normal)), reflect(ray.direction, rayHit.normal), rayHit.smoothness));
             ray.energy *= (1.0 / specChance) * rayHit.specular;
@@ -408,7 +407,6 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
         ray.direction = viewDirectionWS;
         ray.energy = half3(1.0, 1.0, 1.0);
 
-        //color = half3(0.0, 0.0, 0.0);
         float time = unity_DeltaTime.y * _Time.y;
 
         // For rays from camera to scene (first bounce), add an initial distance according to the world position reconstructed from depth.
