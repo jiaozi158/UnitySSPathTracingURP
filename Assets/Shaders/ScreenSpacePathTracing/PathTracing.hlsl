@@ -38,12 +38,6 @@
     #define STEP_SIZE             0.2
     #define MAX_STEP              192
     #define RAY_BIAS              0.001
-    #define RAY_BOUNCE            5
-#elif defined(_RAY_MARCHING_VERY_HIGH)
-    #define MARCHING_THICKNESS    0.05
-    #define STEP_SIZE             0.15
-    #define MAX_STEP              256
-    #define RAY_BIAS              0.001
     #define RAY_BOUNCE            6
 #else //defined(_RAY_MARCHING_LOW)
     #define MARCHING_THICKNESS    0.1
@@ -79,7 +73,7 @@ TEXTURE2D_X_HALF(_GBuffer2); // normalWS.rgb + smoothness.a
 // It's also the Emission GBuffer when there's no lighting in scene.
 TEXTURE2D_X(_BlitTexture);   // indirectLighting.rgb (B10G11R11 / R16G16B16A16)
 
-SamplerState my_point_clamp_sampler;
+SAMPLER(my_point_clamp_sampler);
 
 #if _RENDER_PASS_ENABLED
 
@@ -106,12 +100,47 @@ half energy(half3 color)
     return dot(color, 1.0 / 3.0);
 }
 
-half SmoothnessToPhongAlpha(half smoothness)
+
+// From HDRP "RayTracingSampling.hlsl"
+// This is an implementation of the method from the paper
+// "A Low-Discrepancy Sampler that Distributes Monte Carlo Errors as a Blue Noise in Screen Space" by Heitz et al.
+float GetBNDSequenceSample(uint2 pixelCoord, uint sampleIndex, uint sampleDimension)
 {
-    return pow(1000.0, smoothness * smoothness);
+    // wrap arguments
+    pixelCoord = pixelCoord & 127;
+    sampleIndex = sampleIndex & 255;
+    sampleDimension = sampleDimension & 255;
+
+    // xor index based on optimized ranking
+    uint rankingIndex = (pixelCoord.x + pixelCoord.y * 128) * 8 + (sampleDimension & 7);
+    uint rankedSampleIndex = sampleIndex ^ clamp((uint)(_RankingTileXSPP[uint2(rankingIndex & 127, rankingIndex / 128)] * 256.0), 0, 255);
+
+    // fetch value in sequence
+    uint value = clamp((uint)(_OwenScrambledTexture[uint2(sampleDimension, rankedSampleIndex.x)] * 256.0), 0, 255);
+
+    // If the dimension is optimized, xor sequence value based on optimized scrambling
+    uint scramblingIndex = (pixelCoord.x + pixelCoord.y * 128) * 8 + (sampleDimension & 7);
+    float scramblingValue = min(_ScramblingTileXSPP[uint2(scramblingIndex & 127, scramblingIndex / 128)], 0.999);
+    value = value ^ uint(scramblingValue * 256.0);
+
+    // Convert to float (to avoid the same 1/256th quantization everywhere, we jitter by the pixel scramblingValue)
+    return (scramblingValue + value) / 256.0;
 }
 
-void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 specular, inout half3 normal, inout half3 emission, inout half smoothness)
+// Generate a random value according to the current noise method.
+// Counter is built into the function. (_Seed)
+float GenerateRandomValue(float2 screenUV)
+{
+    float time = unity_DeltaTime.y * _Time.y;
+    _Seed += 1.0;
+#if defined(METHOD_BLUE_NOISE)
+    return GetBNDSequenceSample(uint2(screenUV * _ScreenSize.xy), time, _Seed);
+#else
+    return GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, time + _Seed));
+#endif
+}
+
+void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 specular, inout half3 normal, inout half3 emission, inout half smoothness, inout half metallic)
 {
 #if defined(_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
     screenUV = (screenUV * 2.0 - 1.0) * _ScreenSize.zw;
@@ -140,6 +169,7 @@ void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 
     albedo = isForward? half3(0.0, 0.0, 0.0) : gbuffer0.rgb;
     
     uint materialFlags = UnpackMaterialFlags(gbuffer0.a);
+    metallic = kMaterialFlagSpecularSetup ? energy(gbuffer1.rgb) : gbuffer1.r; // Metallic Percentage
     specular = materialFlags == kMaterialFlagSpecularSetup ? gbuffer1.rgb : lerp(kDieletricSpec.rgb, albedo, gbuffer1.r); // Specular & Metallic setup conversion
 
 #ifdef _GBUFFER_NORMALS_OCT
@@ -177,6 +207,7 @@ struct RayHit
     half3  normal;
     half3  emission;
     half   smoothness;
+    half   metallic; // Metallic Percentage
 };
 
 // position : the intersection between Ray and Scene.
@@ -193,6 +224,7 @@ RayHit InitializeRayHit()
     rayHit.normal = half3(0.0, 0.0, 0.0);
     rayHit.emission = half3(0.0, 0.0, 0.0);
     rayHit.smoothness = 0.0;
+    rayHit.metallic = 0.0;
     return rayHit;
 }
 
@@ -267,8 +299,15 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
                 rayHit.position = lerp(lastRayPositionWS, rayHit.position, lastDepthDiff / (lastDepthDiff - depthDiff));
             }
 
-            HitSurfaceDataFromGBuffer(rayPositionNDC.xy, rayHit.albedo, rayHit.specular, rayHit.normal, rayHit.emission, rayHit.smoothness);
+            HitSurfaceDataFromGBuffer(rayPositionNDC.xy, rayHit.albedo, rayHit.specular, rayHit.normal, rayHit.emission, rayHit.smoothness, rayHit.metallic);
             break;
+        }
+        // [Optimization] Exponentially increase the stepSize when the ray hasn't passed through the intersection.
+        // From https://blog.voxagon.se/2018/01/03/screen-space-path-tracing-diffuse.html
+        // The "1.5" is the exponential constant, which should be above "1.0".
+        else if (!startBinarySearch)
+        {
+            stepSize *= 1.0;
         }
 
         // Update last step's depth difference.
@@ -285,21 +324,21 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
     if (rayHit.distance > REAL_EPS)
     {
         // Calculate chances of diffuse and specular reflection.
-        rayHit.albedo = min(half3(1.0, 1.0, 1.0) - rayHit.specular, rayHit.albedo);
         half specChance = energy(rayHit.specular);
         half diffChance = energy(rayHit.albedo);
 
         // Roulette-select the ray's path.
         half roulette = random.z;
-        if (roulette < specChance)
+
+
+        float fresnel = F_Schlick(0.04, max(rayHit.smoothness, 0.04), saturate(dot(rayHit.normal, ray.direction)));
+        if (specChance > 0 && roulette < specChance + fresnel)
         {
             // Specular reflection
             rayHit.specular = lerp(rayHit.albedo, rayHit.specular, rayHit.specular.r);
             // Fresnel effect
-            rayHit.smoothness = F_Schlick(rayHit.smoothness, saturate(dot(rayHit.normal, ray.direction)));
+            //rayHit.smoothness = F_Schlick(0.04, rayHit.smoothness, saturate(dot(rayHit.normal, ray.direction)));
             ray.position = rayHit.position + rayHit.normal * RAY_BIAS;
-            half alpha = SmoothnessToPhongAlpha(rayHit.smoothness);
-            float2 phongAlpha = saturate(pow(random.xy, 1.0 / (alpha + 1.0)));
             ray.direction = normalize(lerp(SampleHemisphereCosine(random.x, random.y, reflect(ray.direction, rayHit.normal)), reflect(ray.direction, rayHit.normal), rayHit.smoothness));
             ray.energy *= (1.0 / specChance) * rayHit.specular;
         }
@@ -369,7 +408,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
         ray.direction = viewDirectionWS;
         ray.energy = half3(1.0, 1.0, 1.0);
 
-        color = half3(0.0, 0.0, 0.0);
+        //color = half3(0.0, 0.0, 0.0);
         float time = unity_DeltaTime.y * _Time.y;
 
         // For rays from camera to scene (first bounce), add an initial distance according to the world position reconstructed from depth.
@@ -377,9 +416,9 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
         {
             rayHit = RayMarching(ray, dither, true, screenUV, positionWS, cameraPositionWS);
 
-            random.x = GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, uint(time * RAY_COUNT * RAY_BOUNCE)));
-            random.y = GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, uint(time * RAY_COUNT * RAY_BOUNCE + 1)));
-            random.z = GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, uint(time * RAY_COUNT * RAY_BOUNCE + 2)));
+            random.x = GenerateRandomValue(screenUV);
+            random.y = GenerateRandomValue(screenUV);
+            random.z = GenerateRandomValue(screenUV);
 
 #if defined(_IGNORE_FORWARD_OBJECTS)
             isForward = rayHit.smoothness == 0.0 ? true : false;
@@ -393,7 +432,8 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
             }
             else
             {
-                color += ray.energy * EvaluateColor(ray, rayHit, dither, random, viewDirectionWS, isBackground);
+                // energy * emission * SPP accumulation factor
+                color += ray.energy * EvaluateColor(ray, rayHit, dither, random, viewDirectionWS, isBackground) * rcp(RAY_COUNT);
             }
         }
 
@@ -410,11 +450,11 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
             rayHit.smoothness = 1.0 - sqrt(modifiedRoughness);
             roughnessBias += oldRoughness * 0.75;
 
-            random.x = GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, uint(time * RAY_COUNT * RAY_BOUNCE + j)));
-            random.y = GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, uint(time * RAY_COUNT * RAY_BOUNCE + j + 1)));
-            random.z = GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, uint(time * RAY_COUNT * RAY_BOUNCE + j + 2)));
+            random.x = GenerateRandomValue(screenUV);
+            random.y = GenerateRandomValue(screenUV);
+            random.z = GenerateRandomValue(screenUV);
             
-            color += ray.energy * EvaluateColor(ray, rayHit, dither, random, viewDirectionWS);
+            color += ray.energy * EvaluateColor(ray, rayHit, dither, random, viewDirectionWS) * rcp(RAY_COUNT);
 
             if (!any(ray.energy))
                 break;
@@ -423,7 +463,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
             // From https://blog.demofox.org/2020/06/06/casual-shadertoy-path-tracing-2-image-improvement-and-glossy-reflections/
             // As the throughput gets smaller, the ray is more likely to get terminated early.
             // Survivors have their value boosted to make up for fewer samples being in the average.
-            half stopRayEnergy = GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, uint(time * RAY_COUNT * RAY_BOUNCE + j + 3)));
+            half stopRayEnergy = GenerateRandomValue(screenUV);
 
             half maxRayEnergy = max(max(ray.energy.r, ray.energy.g), ray.energy.b);
 

@@ -17,7 +17,7 @@ Shader "Hidden/AccumulateFrame"
 		Pass
 		{
 			Name "Accumulation"
-		        Tags { "LightMode" = "Accumulation" }
+		    Tags { "LightMode" = "Accumulation" }
 
 			HLSLPROGRAM
 			#pragma vertex vert
@@ -27,6 +27,9 @@ Shader "Hidden/AccumulateFrame"
 
 			TEXTURE2D(_MainTex);
 			SamplerState my_point_clamp_sampler;
+
+			// Camera or Per Object motion vectors.
+			TEXTURE2D(_MotionVectorTexture);
 
 			CBUFFER_START(UnityPerMaterial)
 			float _Sample;
@@ -54,7 +57,15 @@ Shader "Hidden/AccumulateFrame"
 
 			half4 frag(Varyings input) : SV_Target
 			{
-				if (_Sample == 0)
+				// TODO: Generate a history texture to store "_Sample" for each pixel, so that the accumulation will be usable for real-time rendering.
+
+				// Will be per object motion in future URP.
+				float2 prevUV = input.uv + SAMPLE_TEXTURE2D_LOD(_MotionVectorTexture, my_point_clamp_sampler, input.uv, 0).xy;
+
+				// When object or camera moves, we should re-accumulate the pixel.
+				bool reAccumulate = (_Sample == 0.0) ? true : false;
+				//bool reAccumulate = (_Sample == 0.0) || (input.uv.x != prevUV.x) || (input.uv.y != prevUV.y) ? true : false;
+				if (reAccumulate)
 					return half4(SAMPLE_TEXTURE2D_LOD(_MainTex, my_point_clamp_sampler, input.uv, 0).rgb, 1.0);
 				else
 					return half4(SAMPLE_TEXTURE2D_LOD(_MainTex, my_point_clamp_sampler, input.uv, 0).rgb, (1.0 / (_Sample + 1.0)));

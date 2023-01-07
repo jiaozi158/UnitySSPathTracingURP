@@ -30,7 +30,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             Debug.LogError("Screen Space Path Tracing: Accumulation material is empty.");
             return;
         }
-        
+
 
         if (m_AccumulationPass == null)
         {
@@ -56,7 +56,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         private int sample = 0;
 
         private Material m_Material;
-        private RTHandle m_TmpColorHandle;
+        private RTHandle m_AccumulateColorHandle;
 
         // Reset the accumulation when scene has changed.
         // This is not perfect because we cannot detect per mesh changes or per light changes.
@@ -73,7 +73,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
         public void Dispose()
         {
-            m_TmpColorHandle?.Release();
+            m_AccumulateColorHandle?.Release();
         }
 
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
@@ -81,7 +81,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             var desc = renderingData.cameraData.cameraTargetDescriptor;
             desc.depthBufferBits = 0; // Color and depth cannot be combined in RTHandles
 
-            RenderingUtils.ReAllocateIfNeeded(ref m_TmpColorHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_PathTracingAccumulationTexture");
+            RenderingUtils.ReAllocateIfNeeded(ref m_AccumulateColorHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_PathTracingAccumulationTexture");
 
             ConfigureTarget(renderingData.cameraData.renderer.cameraColorTargetHandle);
             ConfigureClear(ClearFlag.None, Color.black);
@@ -105,13 +105,13 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
         public override void FrameCleanup(CommandBuffer cmd)
         {
-            //cmd.ReleaseTemporaryRT(m_TmpColorHandle.GetInstanceID());
-            cmd.ReleaseTemporaryRT(Shader.PropertyToID(m_TmpColorHandle.name));
+            //cmd.ReleaseTemporaryRT(m_AccumulateColorHandle.GetInstanceID());
+            cmd.ReleaseTemporaryRT(Shader.PropertyToID(m_AccumulateColorHandle.name));
         }
 
         public override void OnCameraCleanup(CommandBuffer cmd)
         {
-            m_TmpColorHandle = null;
+            m_AccumulateColorHandle = null;
         }
 
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
@@ -119,22 +119,20 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             CommandBuffer cmd = CommandBufferPool.Get();
             using (new ProfilingScope(cmd, new ProfilingSampler("Path Tracing Camera Accumulation")))
             {
-                bool lightsUpdated = prevLightsList != null && prevLightsList == renderingData.lightData.visibleLights;
-                bool probesUpdated = prevProbesList != null && prevProbesList == renderingData.cullResults.visibleReflectionProbes;
-                if (lightsUpdated || probesUpdated)
-                {
-                    prevLightsList = renderingData.lightData.visibleLights;
-                }
-                else
+                bool lightsNoUpdate = prevLightsList != null && prevLightsList == renderingData.lightData.visibleLights;
+                bool probesNoUpdate = prevProbesList != null && prevProbesList == renderingData.cullResults.visibleReflectionProbes;
+                if (!lightsNoUpdate || !probesNoUpdate)
                 {
                     sample = 0;
-                    prevLightsList = renderingData.lightData.visibleLights;
                 }
+
+                prevLightsList = renderingData.lightData.visibleLights;
+                prevProbesList = renderingData.cullResults.visibleReflectionProbes;
 
                 m_Material.SetFloat("_Sample", sample);
 
                 // If the HDR precision is set to 64 Bits, the maximum sample can be 2048.
-                UnityEngine.Experimental.Rendering.GraphicsFormat currentGraphicsFormat = m_TmpColorHandle.rt.graphicsFormat;
+                UnityEngine.Experimental.Rendering.GraphicsFormat currentGraphicsFormat = m_AccumulateColorHandle.rt.graphicsFormat;
                 int maxSample = currentGraphicsFormat == UnityEngine.Experimental.Rendering.GraphicsFormat.B10G11R11_UFloatPack32 ? 256 : 2048;
                 if (sample < maxSample)
                     sample++;
@@ -143,21 +141,21 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
                 //m_Material.SetTexture("_MainTex", renderingData.cameraData.renderer.cameraColorTargetHandle);
                 // Load & Store actions are important to support acculumation.
-                //Blitter.BlitCameraTexture(cmd, renderingData.cameraData.renderer.cameraColorTargetHandle, m_TmpColorHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, m_Material, 0);
-                //Blitter.BlitCameraTexture(cmd, m_TmpColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle);
+                //Blitter.BlitCameraTexture(cmd, renderingData.cameraData.renderer.cameraColorTargetHandle, m_AccumulateColorHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, m_Material, 0);
+                //Blitter.BlitCameraTexture(cmd, m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle);
 
 
                 ///*
                 // Load & Store actions are important to support acculumation.
                 cmd.SetRenderTarget(
-                m_TmpColorHandle,
+                m_AccumulateColorHandle,
                 RenderBufferLoadAction.Load,
                 RenderBufferStoreAction.Store,
-                m_TmpColorHandle,
+                m_AccumulateColorHandle,
                 RenderBufferLoadAction.DontCare,
                 RenderBufferStoreAction.DontCare);
-                cmd.Blit(renderingData.cameraData.renderer.cameraColorTargetHandle.rt, m_TmpColorHandle, m_Material, 0);
-                cmd.Blit(m_TmpColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle);
+                cmd.Blit(renderingData.cameraData.renderer.cameraColorTargetHandle.rt, m_AccumulateColorHandle, m_Material, 0);
+                cmd.Blit(m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle);
                 //*/
 
             }

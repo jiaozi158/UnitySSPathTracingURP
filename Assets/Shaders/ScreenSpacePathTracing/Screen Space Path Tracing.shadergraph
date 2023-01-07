@@ -11,6 +11,18 @@
         },
         {
             "m_Id": "50c98460d3804fbbbb9730c985431b9f"
+        },
+        {
+            "m_Id": "cfb23faacb2640408133dbf21c0c832e"
+        },
+        {
+            "m_Id": "cb9a5491f2cb4f218cf30cea18b21415"
+        },
+        {
+            "m_Id": "245e00b832404092a263407f23460a1b"
+        },
+        {
+            "m_Id": "2ba7b2fdff9347d480ced5925b953481"
         }
     ],
     "m_Keywords": [
@@ -28,6 +40,9 @@
         },
         {
             "m_Id": "0c8c09dd178e40e9975b71d068fa0df0"
+        },
+        {
+            "m_Id": "108ee751e9154cf69eaa5e8d3267ead0"
         }
     ],
     "m_Dropdowns": [],
@@ -43,6 +58,9 @@
         },
         {
             "m_Id": "6be4c51602b0417fb20aae321d4d3be0"
+        },
+        {
+            "m_Id": "8b45d87ef3a14a9e8ee2a3336a3dcc63"
         }
     ],
     "m_Nodes": [
@@ -648,6 +666,42 @@
 }
 
 {
+    "m_SGVersion": 1,
+    "m_Type": "UnityEditor.ShaderGraph.ShaderKeyword",
+    "m_ObjectId": "108ee751e9154cf69eaa5e8d3267ead0",
+    "m_Guid": {
+        "m_GuidSerialized": "80cfd8df-d35a-4acb-a09d-80731d862f25"
+    },
+    "m_Name": "Method",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Method",
+    "m_DefaultReferenceName": "_METHOD",
+    "m_OverrideReferenceName": "METHOD",
+    "m_GeneratePropertyBlock": true,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_KeywordType": 1,
+    "m_KeywordDefinition": 0,
+    "m_KeywordScope": 0,
+    "m_KeywordStages": 63,
+    "m_Entries": [
+        {
+            "id": 2,
+            "displayName": "Hashed Random",
+            "referenceName": "HASHED_RANDOM"
+        },
+        {
+            "id": 1,
+            "displayName": "Blue Noise",
+            "referenceName": "BLUE_NOISE"
+        }
+    ],
+    "m_Value": 0,
+    "m_IsEditable": true
+}
+
+{
     "m_SGVersion": 0,
     "m_Type": "UnityEditor.ShaderGraph.Vector3MaterialSlot",
     "m_ObjectId": "11518c799d2c41f4bd45659893391882",
@@ -922,10 +976,43 @@
 
 {
     "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Internal.Texture2DShaderProperty",
+    "m_ObjectId": "245e00b832404092a263407f23460a1b",
+    "m_Guid": {
+        "m_GuidSerialized": "0534553d-62a1-4770-8555-36d3c4bd1f5e"
+    },
+    "m_Name": "Ranking Tile XSPP",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Ranking Tile XSPP",
+    "m_DefaultReferenceName": "_Ranking_Tile_XSPP",
+    "m_OverrideReferenceName": "_RankingTileXSPP",
+    "m_GeneratePropertyBlock": true,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_Precision": 0,
+    "overrideHLSLDeclaration": false,
+    "hlslDeclarationOverride": 0,
+    "m_Hidden": false,
+    "m_Value": {
+        "m_SerializedTexture": "{\"texture\":{\"fileID\":2800000,\"guid\":\"1e604a266c415cd46b36d97cd9220aa8\",\"type\":3}}",
+        "m_Guid": ""
+    },
+    "isMainTexture": false,
+    "useTilingAndOffset": false,
+    "m_Modifiable": true,
+    "m_DefaultType": 1
+}
+
+{
+    "m_SGVersion": 0,
     "m_Type": "UnityEditor.ShaderGraph.CategoryData",
     "m_ObjectId": "2acb507d5a794c4081e963f8506e6cca",
     "m_Name": "Ray Marching",
     "m_ChildObjectList": [
+        {
+            "m_Id": "108ee751e9154cf69eaa5e8d3267ead0"
+        },
         {
             "m_Id": "f988b41e9237496c8bcfdcf5283b5cbf"
         },
@@ -939,6 +1026,34 @@
             "m_Id": "50c98460d3804fbbbb9730c985431b9f"
         }
     ]
+}
+
+{
+    "m_SGVersion": 1,
+    "m_Type": "UnityEditor.ShaderGraph.Internal.Vector1ShaderProperty",
+    "m_ObjectId": "2ba7b2fdff9347d480ced5925b953481",
+    "m_Guid": {
+        "m_GuidSerialized": "c7f63523-ff62-450d-9d10-db5a9350bd40"
+    },
+    "m_Name": "Private: Random Seed",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Private: Random Seed",
+    "m_DefaultReferenceName": "_Private_Random_Seed",
+    "m_OverrideReferenceName": "_Seed",
+    "m_GeneratePropertyBlock": false,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_Precision": 1,
+    "overrideHLSLDeclaration": false,
+    "hlslDeclarationOverride": 0,
+    "m_Hidden": false,
+    "m_Value": 0.0,
+    "m_FloatType": 0,
+    "m_RangeValues": {
+        "x": 0.0,
+        "y": 1.0
+    }
 }
 
 {
@@ -1655,6 +1770,27 @@
 
 {
     "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.CategoryData",
+    "m_ObjectId": "8b45d87ef3a14a9e8ee2a3336a3dcc63",
+    "m_Name": "Resources",
+    "m_ChildObjectList": [
+        {
+            "m_Id": "2ba7b2fdff9347d480ced5925b953481"
+        },
+        {
+            "m_Id": "cfb23faacb2640408133dbf21c0c832e"
+        },
+        {
+            "m_Id": "cb9a5491f2cb4f218cf30cea18b21415"
+        },
+        {
+            "m_Id": "245e00b832404092a263407f23460a1b"
+        }
+    ]
+}
+
+{
+    "m_SGVersion": 0,
     "m_Type": "UnityEditor.ShaderGraph.Vector3MaterialSlot",
     "m_ObjectId": "8b7c81422fbe4545ab6305396be0b7c6",
     "m_Id": 0,
@@ -2245,6 +2381,36 @@
 
 {
     "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Internal.Texture2DShaderProperty",
+    "m_ObjectId": "cb9a5491f2cb4f218cf30cea18b21415",
+    "m_Guid": {
+        "m_GuidSerialized": "95340222-e2a8-446d-943e-1c13fd9da8e8"
+    },
+    "m_Name": "Scrambling Tile XSPP",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Scrambling Tile XSPP",
+    "m_DefaultReferenceName": "_Scrambling_Tile_XSPP",
+    "m_OverrideReferenceName": "_ScramblingTileXSPP",
+    "m_GeneratePropertyBlock": true,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_Precision": 0,
+    "overrideHLSLDeclaration": false,
+    "hlslDeclarationOverride": 0,
+    "m_Hidden": false,
+    "m_Value": {
+        "m_SerializedTexture": "{\"texture\":{\"fileID\":2800000,\"guid\":\"882fb55d7b3e7c94598a318df9376e32\",\"type\":3}}",
+        "m_Guid": ""
+    },
+    "isMainTexture": false,
+    "useTilingAndOffset": false,
+    "m_Modifiable": true,
+    "m_DefaultType": 1
+}
+
+{
+    "m_SGVersion": 0,
     "m_Type": "UnityEditor.ShaderGraph.DynamicVectorMaterialSlot",
     "m_ObjectId": "cbdafcbabd3744219996c38f97ff8194",
     "m_Id": 0,
@@ -2289,6 +2455,36 @@
         "z": 0.0,
         "w": 0.0
     }
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Internal.Texture2DShaderProperty",
+    "m_ObjectId": "cfb23faacb2640408133dbf21c0c832e",
+    "m_Guid": {
+        "m_GuidSerialized": "94155d22-aa3b-4d8a-b428-56d4d1d64493"
+    },
+    "m_Name": "Owen Scrambled Texture",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Owen Scrambled Texture",
+    "m_DefaultReferenceName": "_Owen_Scrambled_Texture",
+    "m_OverrideReferenceName": "_OwenScrambledTexture",
+    "m_GeneratePropertyBlock": true,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_Precision": 0,
+    "overrideHLSLDeclaration": false,
+    "hlslDeclarationOverride": 0,
+    "m_Hidden": false,
+    "m_Value": {
+        "m_SerializedTexture": "{\"texture\":{\"fileID\":2800000,\"guid\":\"2a205358e67aa9e4a94a128ac9362f4e\",\"type\":3}}",
+        "m_Guid": ""
+    },
+    "isMainTexture": false,
+    "useTilingAndOffset": false,
+    "m_Modifiable": true,
+    "m_DefaultType": 1
 }
 
 {
@@ -2826,11 +3022,6 @@
             "id": 2,
             "displayName": "High",
             "referenceName": "HIGH"
-        },
-        {
-            "id": 5,
-            "displayName": "Very High",
-            "referenceName": "VERY_HIGH"
         }
     ],
     "m_Value": 0,
