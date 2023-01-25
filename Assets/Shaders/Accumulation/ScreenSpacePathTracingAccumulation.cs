@@ -49,7 +49,11 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
-        renderer.EnqueuePass(m_AccumulationPass);
+        // No need to accumulate when rendering reflection probes, this will also break game view accumulation.
+        if (renderingData.cameraData.camera.cameraType != CameraType.Reflection)
+        {
+            renderer.EnqueuePass(m_AccumulationPass);
+        }
     }
 
     public class AccumulationPass : ScriptableRenderPass
