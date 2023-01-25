@@ -14,14 +14,18 @@ Screenshots
 **(BoxScene)**
 
  ![MixedLighting](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/URP_ScreenSpacePathTracing_MixedLighting.jpg)
- 
- ![SkyLightingOnly](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/URP_ScreenSpacePathTracing_SkyLightingOnly.jpg)
- 
+
  ![WithoutAccumulation](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/URP_ScreenSpacePathTracing_Moving.jpg)
- 
+
  ![WithAccumulation](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/URP_ScreenSpacePathTracing.jpg)
 
- **Note:** Enable URP Temporal Anti-aliasing is important for improving stability. (exists since URP 15)
+**(Enable Reflection Probe Fallback)**
+
+ ![ProbeFallBackOn1](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/ProbeFallBack.jpg)
+
+ ![ProbeFallBackOn2](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/EmissionFromReflectionProbe.jpg)
+
+ **Note:** Enable URP Temporal Anti-aliasing is important for improving stability. (exists since latest URP 14)
 
 Documentation
 ------------
@@ -29,7 +33,7 @@ Documentation
 
 Requirements
 ------------
-- Unity 2022.2 and URP 14 (URP 15 is recomended with TAA enabled)
+- Unity 2022.2 and URP 14 (enable TAA is recommended)
 - Deferred rendering path (OpenGL will always in Forward path)
 
 License

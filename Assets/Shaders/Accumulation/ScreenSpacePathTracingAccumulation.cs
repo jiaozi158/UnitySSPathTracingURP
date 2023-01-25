@@ -12,6 +12,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     public Material m_Material;
     private const string m_AccumulationShaderName = "Hidden/AccumulateFrame";
     private AccumulationPass m_AccumulationPass;
+
     public override void Create()
     {
         // Check if the accumulation material uses the correct shader.

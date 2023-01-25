@@ -100,7 +100,6 @@ half energy(half3 color)
     return dot(color, 1.0 / 3.0);
 }
 
-
 // From HDRP "RayTracingSampling.hlsl"
 // This is an implementation of the method from the paper
 // "A Low-Discrepancy Sampler that Distributes Monte Carlo Errors as a Blue Noise in Screen Space" by Heitz et al.
@@ -120,7 +119,7 @@ float GetBNDSequenceSample(uint2 pixelCoord, uint sampleIndex, uint sampleDimens
 
     // If the dimension is optimized, xor sequence value based on optimized scrambling
     uint scramblingIndex = (pixelCoord.x + pixelCoord.y * 128) * 8 + (sampleDimension & 7);
-    float scramblingValue = min(_ScramblingTileXSPP[uint2(scramblingIndex & 127, scramblingIndex / 128)], 0.999);
+    float scramblingValue = min(_ScramblingTileXSPP[uint2(scramblingIndex & 127, scramblingIndex / 128)].x, 0.999);
     value = value ^ uint(scramblingValue * 256.0);
 
     // Convert to float (to avoid the same 1/256th quantization everywhere, we jitter by the pixel scramblingValue)
@@ -140,7 +139,7 @@ float GenerateRandomValue(float2 screenUV)
 #endif
 }
 
-void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 specular, inout half3 normal, inout half3 emission, inout half smoothness, inout half metallic)
+void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 specular, inout half3 normal, inout half3 emission, inout half smoothness)
 {
 #if defined(_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
     screenUV = (screenUV * 2.0 - 1.0) * _ScreenSize.zw;
@@ -169,8 +168,8 @@ void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 
     albedo = isForward? half3(0.0, 0.0, 0.0) : gbuffer0.rgb;
     
     uint materialFlags = UnpackMaterialFlags(gbuffer0.a);
-    metallic = kMaterialFlagSpecularSetup ? energy(gbuffer1.rgb) : gbuffer1.r; // Metallic Percentage
-    specular = materialFlags == kMaterialFlagSpecularSetup ? gbuffer1.rgb : lerp(kDieletricSpec.rgb, albedo, gbuffer1.r); // Specular & Metallic setup conversion
+    // 0.04 is the "Dieletric Specular" (kDieletricSpec.rgb)
+    specular = materialFlags == kMaterialFlagSpecularSetup ? gbuffer1.rgb : lerp(half3(0.04, 0.04, 0.04), albedo, gbuffer1.r); // Specular & Metallic setup conversion
 
 #ifdef _GBUFFER_NORMALS_OCT
     half2 remappedOctNormalWS = half2(Unpack888ToFloat2(gbuffer2.rgb));          // values between [ 0, +1]
@@ -207,7 +206,6 @@ struct RayHit
     half3  normal;
     half3  emission;
     half   smoothness;
-    half   metallic; // Metallic Percentage
 };
 
 // position : the intersection between Ray and Scene.
@@ -224,7 +222,6 @@ RayHit InitializeRayHit()
     rayHit.normal = half3(0.0, 0.0, 0.0);
     rayHit.emission = half3(0.0, 0.0, 0.0);
     rayHit.smoothness = 0.0;
-    rayHit.metallic = 0.0;
     return rayHit;
 }
 
@@ -299,15 +296,8 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
                 rayHit.position = lerp(lastRayPositionWS, rayHit.position, lastDepthDiff / (lastDepthDiff - depthDiff));
             }
 
-            HitSurfaceDataFromGBuffer(rayPositionNDC.xy, rayHit.albedo, rayHit.specular, rayHit.normal, rayHit.emission, rayHit.smoothness, rayHit.metallic);
+            HitSurfaceDataFromGBuffer(rayPositionNDC.xy, rayHit.albedo, rayHit.specular, rayHit.normal, rayHit.emission, rayHit.smoothness);
             break;
-        }
-        // [Optimization] Exponentially increase the stepSize when the ray hasn't passed through the intersection.
-        // From https://blog.voxagon.se/2018/01/03/screen-space-path-tracing-diffuse.html
-        // The "1.5" is the exponential constant, which should be above "1.0".
-        else if (!startBinarySearch)
-        {
-            stepSize *= 1.0;
         }
 
         // Update last step's depth difference.
@@ -318,7 +308,7 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
     return rayHit;
 }
 
-half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, half3 viewDirectionWS, bool isBackground = false)
+half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, half3 viewDirectionWS, float3 positionWS, bool isBackground = false)
 {
     // If the ray intersects the scene.
     if (rayHit.distance > REAL_EPS)
@@ -337,15 +327,17 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
         {
             // Specular reflection
             rayHit.specular = lerp(rayHit.albedo, rayHit.specular, rayHit.specular.r);
-            ray.position = rayHit.position + rayHit.normal * RAY_BIAS;
             ray.direction = normalize(lerp(SampleHemisphereCosine(random.x, random.y, reflect(ray.direction, rayHit.normal)), reflect(ray.direction, rayHit.normal), rayHit.smoothness));
+            // If the random direction is pointing below the surface, try re-generating it with swapped values.
+            ray.direction = (dot(rayHit.normal, -ray.direction) >= 0.0) ? ray.direction : normalize(lerp(SampleHemisphereCosine(random.y, random.x, reflect(ray.direction, rayHit.normal)), reflect(ray.direction, rayHit.normal), rayHit.smoothness));
+            ray.position = rayHit.position + ray.direction * RAY_BIAS;
             ray.energy *= (1.0 / specChance) * rayHit.specular;
         }
         else if (diffChance > 0 && roulette < specChance + diffChance)
         {
             // Diffuse reflection
-            ray.position = rayHit.position + rayHit.normal * RAY_BIAS;
             ray.direction = SampleHemisphereCosine(random.x, random.y, rayHit.normal);
+            ray.position = rayHit.position + ray.direction * RAY_BIAS;
             ray.energy *= (1.0 / diffChance) * rayHit.albedo;
         }
         else
@@ -362,12 +354,49 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
         // Erase the ray's energy - the sky doesn't reflect anything.
         ray.energy = 0.0;
 
-        // Using Box Projected Reflection Probe Fallback would be better, but the related variables seem to be inaccessible in post-processing. (BoxMin, BoxMax, ...)
+        // URP won't set correct reflection probe for a full screen blit mesh. (issue ID: UUM-2631)
+        // The reflection probe(s) is set by a C# script attached to the Camera.
+        // The script won't get the correct probe for scene camera, it'll use game camera's instead.
 
-        // A less ideal solution is to sample the Infinite Projected Reflection Probe.
         half3 color = half3(0.0, 0.0, 0.0);
     #ifdef _USE_REFLECTION_PROBE
-        color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(unity_SpecCube0, samplerunity_SpecCube0, -ray.direction, 0), unity_SpecCube0_HDR).rgb;
+        // Check if the reflection probes are correctly set.
+        if (_ProbeSet == 1.0)
+        {
+            UNITY_BRANCH
+            if (_SpecCube0_ProbePosition.w > 0) // Box Projection Probe
+            {
+                float3 factors = ((-ray.direction > 0 ? _SpecCube0_BoxMax.xyz : _SpecCube0_BoxMin.xyz) - positionWS) / -ray.direction;
+                float scalar = min(min(factors.x, factors.y), factors.z);
+                float3 uvw = -ray.direction * scalar + (positionWS - _SpecCube0_ProbePosition.xyz);
+                color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, uvw, 1), _SpecCube0_HDR).rgb * _Exposure; // "mip level 1" will provide a less noisy result.
+            }
+            else
+            {
+                color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, -ray.direction, 1), _SpecCube0_HDR).rgb * _Exposure;
+            }
+
+            UNITY_BRANCH
+            if (_ProbeWeight > 0.0) // Probe Blending Enabled
+            {
+                half3 probe2Color = half3(0.0, 0.0, 0.0);
+                UNITY_BRANCH
+                if (_SpecCube1_ProbePosition.w > 0) // Box Projection Probe
+                {
+                    float3 factors = ((-ray.direction > 0 ? _SpecCube1_BoxMax.xyz : _SpecCube1_BoxMin.xyz) - positionWS) / -ray.direction;
+                    float scalar = min(min(factors.x, factors.y), factors.z);
+                    float3 uvw = -ray.direction * scalar + (positionWS - _SpecCube1_ProbePosition.xyz);
+                    probe2Color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube1, sampler_SpecCube1, uvw, 1), _SpecCube1_HDR).rgb * _Exposure;
+                }
+                else
+                {
+                    probe2Color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube1, sampler_SpecCube1, -ray.direction, 1), _SpecCube1_HDR).rgb * _Exposure;
+                }
+                // Blend the probes if necessary.
+                color = lerp(color, probe2Color, _ProbeWeight).rgb;
+            }
+        }
+        
     #else
         color = SAMPLE_TEXTURECUBE_LOD(_Static_Lighting_Sky, sampler_Static_Lighting_Sky, -ray.direction, 0).rgb * _Exposure;
     #endif
@@ -399,6 +428,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
 
     // Avoid shader warning that the loop only iterates once.
 #if RAY_COUNT > 1
+    UNITY_LOOP
     for (int i = 0; i < RAY_COUNT; i++)
 #endif
     {
@@ -431,7 +461,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
             else
             {
                 // energy * emission * SPP accumulation factor
-                color += ray.energy * EvaluateColor(ray, rayHit, dither, random, viewDirectionWS, isBackground) * rcp(RAY_COUNT);
+                color += ray.energy * EvaluateColor(ray, rayHit, dither, random, viewDirectionWS, positionWS, isBackground) * rcp(RAY_COUNT);
             }
         }
 
@@ -452,7 +482,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
             random.y = GenerateRandomValue(screenUV);
             random.z = GenerateRandomValue(screenUV);
             
-            color += ray.energy * EvaluateColor(ray, rayHit, dither, random, viewDirectionWS) * rcp(RAY_COUNT);
+            color += ray.energy * EvaluateColor(ray, rayHit, dither, random, viewDirectionWS, positionWS) * rcp(RAY_COUNT);
 
             if (!any(ray.energy))
                 break;
