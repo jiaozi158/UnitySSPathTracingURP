@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-//[RequireComponent(typeof(Camera))]
 // Automatically add a dummy mesh renderer to the object if not exists.
 [ExecuteInEditMode, RequireComponent(typeof(MeshRenderer)), RequireComponent(typeof(Camera))]
 public class PathTracingSetReflectionProbe : MonoBehaviour
@@ -22,7 +21,7 @@ public class PathTracingSetReflectionProbe : MonoBehaviour
             Shader shader = Shader.Find(SSPathTracingName);
             if (PathTracingMaterial.shader != shader)
             {
-                //Debug.LogErrorFormat("Path Tracing Set Reflection Probe: Material is not using {0} shader.", SSPathTracingName);
+                Debug.LogErrorFormat("Path Tracing Set Reflection Probe: Material is not using {0} shader.", SSPathTracingName);
                 isValid = false;
             }
             else
@@ -60,7 +59,7 @@ public class PathTracingSetReflectionProbe : MonoBehaviour
                 bool isBoxProjected = probeList[0].probe.boxProjection;
                 if (isBoxProjected)
                 {
-                    Vector4 probe0Position = probeList[0].probe.transform.position;
+                    Vector3 probe0Position = probeList[0].probe.transform.position;
                     float probe0Mode = isBoxProjected ? 1.0f : 0.0f;
                     PathTracingMaterial.SetVector("_SpecCube0_BoxMin", probeList[0].probe.bounds.min);
                     PathTracingMaterial.SetVector("_SpecCube0_BoxMax", probeList[0].probe.bounds.max);
