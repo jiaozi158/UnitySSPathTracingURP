@@ -34,7 +34,7 @@ Documentation
 Requirements
 ------------
 - Unity 2022.2 and URP 14 (enable TAA is recommended)
-- Deferred rendering path (OpenGL will always in Forward path)
+- Deferred rendering path (OpenGL will always in Forward path, please try Vulkan instead)
 
 License
 ------------
@@ -43,5 +43,7 @@ MIT ![MIT License](http://img.shields.io/badge/license-MIT-blue.svg?style=flat)
 References
 ------------
 [Three-Eyed-Games GPU-Ray-Tracing-in-Unity](http://three-eyed-games.com/2018/05/03/gpu-ray-tracing-in-unity-part-1/)
+
+[Introduction to Path Tracing - Marc Sunet](https://shellblade.net/files/slides/path-tracing.pdf)
 
 Please see [PathTracing.hlsl](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Assets/Shaders/ScreenSpacePathTracing/PathTracing.hlsl).

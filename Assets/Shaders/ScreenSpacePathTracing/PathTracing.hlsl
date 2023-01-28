@@ -314,7 +314,7 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
     if (rayHit.distance > REAL_EPS)
     {
         // Calculate chances of diffuse and specular reflection.
-        half specChance = energy(rayHit.specular);
+        half specChance = energy(rayHit.specular); // Should we replace this with metallic? (maximum component of "rayHit.specular.rgb")
         half diffChance = energy(rayHit.albedo);
 
         // Roulette-select the ray's path.
@@ -326,17 +326,16 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
         if (specChance > 0 && roulette < specChance + fresnel)
         {
             // Specular reflection
-            rayHit.specular = lerp(rayHit.albedo, rayHit.specular, rayHit.specular.r);
             ray.direction = normalize(lerp(SampleHemisphereCosine(random.x, random.y, reflect(ray.direction, rayHit.normal)), reflect(ray.direction, rayHit.normal), rayHit.smoothness));
             // If the random direction is pointing below the surface, try re-generating it with swapped values.
             ray.direction = (dot(rayHit.normal, -ray.direction) >= 0.0) ? ray.direction : normalize(lerp(SampleHemisphereCosine(random.y, random.x, reflect(ray.direction, rayHit.normal)), reflect(ray.direction, rayHit.normal), rayHit.smoothness));
             ray.position = rayHit.position + ray.direction * RAY_BIAS;
             ray.energy *= rcp(specChance) * rayHit.specular;
         }
-        else if (diffChance > 0 && roulette < specChance + diffChance)
+        else if (diffChance > 0 && roulette < specChance + diffChance + fresnel)
         {
             // Diffuse reflection
-            ray.direction = SampleHemisphereCosine(random.x, random.y, rayHit.normal);
+            ray.direction = -SampleHemisphereCosine(random.x, random.y, rayHit.normal); // The random direction here needs an inversion to match the reference, what happened?
             ray.position = rayHit.position + ray.direction * RAY_BIAS;
             ray.energy *= rcp(diffChance) * rayHit.albedo;
         }
