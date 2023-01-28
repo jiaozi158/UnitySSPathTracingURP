@@ -132,7 +132,7 @@ float GenerateRandomValue(float2 screenUV)
 {
     float time = unity_DeltaTime.y * _Time.y;
     _Seed += 1.0;
-#if defined(METHOD_BLUE_NOISE)
+#if defined(_METHOD_BLUE_NOISE)
     return GetBNDSequenceSample(uint2(screenUV * _ScreenSize.xy), time, _Seed);
 #else
     return GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, time + _Seed));
@@ -293,7 +293,7 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
             {
                 // Seems that interpolating screenUV is giving worse results, so do it for positionWS only.
                 //rayPositionNDC.xy = lerp(lastRayPositionNDC, rayPositionNDC.xy, lastDepthDiff / (lastDepthDiff - depthDiff));
-                rayHit.position = lerp(lastRayPositionWS, rayHit.position, lastDepthDiff / (lastDepthDiff - depthDiff));
+                rayHit.position = lerp(lastRayPositionWS, rayHit.position, lastDepthDiff * rcp(lastDepthDiff - depthDiff));
             }
 
             HitSurfaceDataFromGBuffer(rayPositionNDC.xy, rayHit.albedo, rayHit.specular, rayHit.normal, rayHit.emission, rayHit.smoothness);
@@ -331,14 +331,14 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
             // If the random direction is pointing below the surface, try re-generating it with swapped values.
             ray.direction = (dot(rayHit.normal, -ray.direction) >= 0.0) ? ray.direction : normalize(lerp(SampleHemisphereCosine(random.y, random.x, reflect(ray.direction, rayHit.normal)), reflect(ray.direction, rayHit.normal), rayHit.smoothness));
             ray.position = rayHit.position + ray.direction * RAY_BIAS;
-            ray.energy *= (1.0 / specChance) * rayHit.specular;
+            ray.energy *= rcp(specChance) * rayHit.specular;
         }
         else if (diffChance > 0 && roulette < specChance + diffChance)
         {
             // Diffuse reflection
             ray.direction = SampleHemisphereCosine(random.x, random.y, rayHit.normal);
             ray.position = rayHit.position + ray.direction * RAY_BIAS;
-            ray.energy *= (1.0 / diffChance) * rayHit.albedo;
+            ray.energy *= rcp(diffChance) * rayHit.albedo;
         }
         else
         {
@@ -361,6 +361,7 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
         half3 color = half3(0.0, 0.0, 0.0);
     #ifdef _USE_REFLECTION_PROBE
         // Check if the reflection probes are correctly set.
+        UNITY_BRANCH
         if (_ProbeSet == 1.0)
         {
             UNITY_BRANCH
@@ -406,8 +407,13 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
 }
 
 // Shader Graph does not support passing custom structure.
-void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 screenUV, float3 positionWS, bool isBackground, half dither, out half3 color)
+void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 screenUV, float3 positionWS, bool isBackground, out half3 color)
 {
+    half dither = 0.0;
+#if defined(_DITHERING)
+    dither = (GenerateRandomValue(screenUV) * 2.0 - 1.0) * 0.1 * _Dither_Intensity; // Range from -0.1 to 0.1
+#endif
+
     // Avoid shader warning of using unintialized value.
     color = half3(0.0, 0.0, 0.0);
     if (isBackground)
@@ -466,6 +472,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
         }
 
         // Other bounces.
+        UNITY_LOOP
         for (int j = 1; j < RAY_BOUNCE; j++)
         {
             rayHit = RayMarching(ray, dither);
@@ -499,7 +506,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
                 break;
 
             // Add the energy we 'lose' by randomly terminating paths.
-            ray.energy *= 1.0 / maxRayEnergy;
+            ray.energy *= rcp(maxRayEnergy);
 
         }
     }
