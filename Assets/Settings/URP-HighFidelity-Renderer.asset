@@ -1,5 +1,21 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
+--- !u!114 &-7163438884457882376
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 25a99b4822eb3a6489cf756541c09390, type: 3}
+  m_Name: PathTracingForwardGBuffer
+  m_EditorClassIdentifier: 
+  m_Active: 1
+  PassEvent: 300
+  PassNames:
+  - UniversalGBuffer
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -18,7 +34,8 @@ MonoBehaviour:
   m_RendererFeatures:
   - {fileID: 3982393931211024189}
   - {fileID: 9011213389551791958}
-  m_RendererFeatureMap: 3d2781492e4e4437566f7a97d5420e7d
+  - {fileID: -7163438884457882376}
+  m_RendererFeatureMap: 3d2781492e4e4437566f7a97d5420e7df8dcaac1495a969c
   m_UseNativeRenderPass: 0
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
   xrSystemData: {fileID: 11400000, guid: 60e1133243b97e347b653163a8c01b64, type: 2}

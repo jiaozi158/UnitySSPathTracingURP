@@ -6,7 +6,7 @@ Global Setup
 
 UnitySSPathTracingURP requires:
 
-- Deferred rendering path in use. (OpenGL will always be in Forward)
+- Deferred rendering path in use. (OpenGL will always be in Forward, please try [Forward path support](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/ForwardPathSupport.md))
 
  ![SetURPToDeferredPath](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/Settings/URP_DeferredPath.png)
 

@@ -8,5 +8,8 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/BoxScene.unity
     guid: 99c9720ab356a0642a771bea13969a05
+  - enabled: 1
+    path: Assets/Scenes/ForwardScene.unity
+    guid: 4b84528388870c24fb769c0e5cd90427
   m_configObjects: {}
   m_UseUCBPForAssetBundles: 0

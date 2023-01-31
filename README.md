@@ -34,7 +34,9 @@ Documentation
 Requirements
 ------------
 - Unity 2022.2 and URP 14 (enable TAA is recommended)
-- Deferred rendering path (OpenGL will always in Forward path, please try Vulkan instead)
+- Deferred rendering path (OpenGL will always in Forward path)
+- Forward rendering path ([need extra setup](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/ForwardPathSupport.md))
+- Multiple Render Targets support (at least OpenGL ES 3.0 or equivalent)
 
 License
 ------------

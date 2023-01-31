@@ -241,17 +241,19 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
     UNITY_LOOP
     for (int i = 1; i <= MAX_STEP; i++)
     {
-        float4 rayStartPositionCS = ComputeClipSpacePosition(ray.position + accumulatedStep * ray.direction, GetWorldToHClipMatrix());
-
         accumulatedStep += (stepSize + stepSize * dither);
 
         float3 rayPositionWS = ray.position + accumulatedStep * ray.direction;
 
         float3 rayPositionNDC = ComputeNormalizedDeviceCoordinatesWithZ(rayPositionWS, GetWorldToHClipMatrix());
 
-        float sceneDepth = -LinearEyeDepth(SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_CameraDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r, _ZBufferParams); // sampledDepth is (near to far) 0..1
+        float sceneDepth = -LinearEyeDepth(SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_CameraDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r, _ZBufferParams); // z buffer depth
 
-        float hitDepth = LinearEyeDepth(rayPositionNDC.z, _ZBufferParams); // rayPositionNDC.z is (near to far) 1..0
+#if (UNITY_REVERSED_Z == 0) // OpenGL platforms
+        rayPositionNDC.z = rayPositionNDC.z * 0.5 + 0.5; // -1..1 to 0..1
+#endif
+
+        float hitDepth = LinearEyeDepth(rayPositionNDC.z, _ZBufferParams); // Non-GL (DirectX): rayPositionNDC.z is (near to far) 1..0
 
         float depthDiff = hitDepth - sceneDepth;
 
