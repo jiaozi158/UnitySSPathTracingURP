@@ -18,7 +18,7 @@
 // RAY_BIAS           : The bias applied to ray's hit position to avoid self-intersection with hit position.
 //                      Usually no need to adjust it.
 // 
-// RAY_BOUNCE         : Should be at least 2, the first bounce is from camera to scene (stored in GBuffer in this case).
+// RAY_BOUNCE         : The maximum number of times each ray can bounce. (should be at least 1)
 //                      Increasing this may decrease performance but is necessary for recursive reflections.
 //
 // RAY_COUNT          : The number of rays generated per pixel. (Samples Per Pixel)
@@ -38,13 +38,13 @@
     #define STEP_SIZE             0.2
     #define MAX_STEP              192
     #define RAY_BIAS              0.001
-    #define RAY_BOUNCE            6
+    #define RAY_BOUNCE            5
 #else //defined(_RAY_MARCHING_LOW)
     #define MARCHING_THICKNESS    0.1
     #define STEP_SIZE             0.4
     #define MAX_STEP              32
     #define RAY_BIAS              0.001
-    #define RAY_BOUNCE            4
+    #define RAY_BOUNCE            3
 #endif
 // Global quality settings.
     #define RAY_COUNT             1
@@ -89,6 +89,12 @@ FRAMEBUFFER_INPUT_HALF(GBUFFER2);
 
 // Helper functions
 //===================================================================================================================================
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/BRDF.hlsl"
+
+#ifndef kDielectricSpec
+#define kDielectricSpec half4(0.04, 0.04, 0.04, 1.0 - 0.04) // standard dielectric reflectivity coef at incident angle (= 4%)
+#endif
+
 uint UnpackMaterialFlags(float packedMaterialFlags)
 {
     return uint((packedMaterialFlags * 255.0h) + 0.5h);
@@ -165,11 +171,11 @@ void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 
 
     // URP does not clear color GBuffer (albedo & specular), only the depth & stencil.
     // This can cause smearing-like artifacts.
-    albedo = isForward? half3(0.0, 0.0, 0.0) : gbuffer0.rgb;
+    albedo = isForward ? half3(0.0, 0.0, 0.0) : gbuffer0.rgb;
     
     uint materialFlags = UnpackMaterialFlags(gbuffer0.a);
-    // 0.04 is the "Dieletric Specular" (kDieletricSpec.rgb)
-    specular = materialFlags == kMaterialFlagSpecularSetup ? gbuffer1.rgb : lerp(half3(0.04, 0.04, 0.04), albedo, gbuffer1.r); // Specular & Metallic setup conversion
+    specular = materialFlags == kMaterialFlagSpecularSetup ? gbuffer1.rgb : lerp(kDieletricSpec.rgb, max(albedo, kDieletricSpec.rgb), gbuffer1.r); // Specular & Metallic setup conversion
+    specular = isForward ? half3(0.0, 0.0, 0.0) : specular;
 
 #ifdef _GBUFFER_NORMALS_OCT
     half2 remappedOctNormalWS = half2(Unpack888ToFloat2(gbuffer2.rgb));          // values between [ 0, +1]
@@ -316,8 +322,8 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
     if (rayHit.distance > REAL_EPS)
     {
         // Calculate chances of diffuse and specular reflection.
-        half specChance = energy(rayHit.specular); // Should we replace this with metallic? (maximum component of "rayHit.specular.rgb")
-        half diffChance = energy(rayHit.albedo);
+        half specChance = ReflectivitySpecular(rayHit.specular); //energy(rayHit.specular);
+        half diffChance = 1.0 - specChance; //energy(rayHit.albedo);
 
         // Roulette-select the ray's path.
         half roulette = random.z;
@@ -334,7 +340,7 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
             ray.position = rayHit.position + ray.direction * RAY_BIAS;
             ray.energy *= rcp(specChance) * rayHit.specular;
         }
-        else if (diffChance > 0 && roulette < specChance + diffChance + fresnel)
+        else if (diffChance > 0 && roulette < diffChance + fresnel)
         {
             // Diffuse reflection
             ray.direction = -SampleHemisphereCosine(random.x, random.y, rayHit.normal); // The random direction here needs an inversion to match the reference, what happened?
@@ -474,7 +480,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
 
         // Other bounces.
         UNITY_LOOP
-        for (int j = 1; j < RAY_BOUNCE; j++)
+        for (int j = 0; j < RAY_BOUNCE; j++)
         {
             rayHit = RayMarching(ray, dither);
 

@@ -83,7 +83,7 @@ public class PathTracingForwardGBuffer : ScriptableRendererFeature
             else if (index == 1) // sRGB specular, occlusion
                 return GraphicsFormat.R8G8B8A8_UNorm;
             else if (index == 2) // normal normal normal packedSmoothness
-                // NormalWS range is -1.0 to 1.0, so we nned a signed render texture.
+                // NormalWS range is -1.0 to 1.0, so we need a signed render texture.
                 if (SystemInfo.IsFormatSupported(GraphicsFormat.R8G8B8A8_SNorm, FormatUsage.Render))
                     return GraphicsFormat.R8G8B8A8_SNorm;
                 else
