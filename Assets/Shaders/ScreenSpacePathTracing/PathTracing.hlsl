@@ -334,9 +334,7 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
         if (specChance > 0 && roulette < specChance + fresnel)
         {
             // Specular reflection
-            ray.direction = normalize(lerp(SampleHemisphereCosine(random.x, random.y, reflect(ray.direction, rayHit.normal)), reflect(ray.direction, rayHit.normal), rayHit.smoothness));
-            // If the random direction is pointing below the surface, try re-generating it with swapped values.
-            ray.direction = (dot(rayHit.normal, -ray.direction) >= 0.0) ? ray.direction : normalize(lerp(SampleHemisphereCosine(random.y, random.x, reflect(ray.direction, rayHit.normal)), reflect(ray.direction, rayHit.normal), rayHit.smoothness));
+            ray.direction = normalize(lerp(-SampleHemisphereCosine(random.x, random.y, rayHit.normal), reflect(ray.direction, rayHit.normal), rayHit.smoothness));
             ray.position = rayHit.position + ray.direction * RAY_BIAS;
             ray.energy *= rcp(specChance) * rayHit.specular;
         }
@@ -345,7 +343,9 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
             // Diffuse reflection
             ray.direction = -SampleHemisphereCosine(random.x, random.y, rayHit.normal); // The random direction here needs an inversion to match the reference, what happened?
             ray.position = rayHit.position + ray.direction * RAY_BIAS;
-            ray.energy *= rcp(diffChance) * rayHit.albedo;
+            // BRDF * cosTheta / PDF
+            // (albedo / PI) * dot(N, L) / (2.0 * PI)
+            ray.energy *= rcp(diffChance) * rayHit.albedo * dot(-ray.direction, rayHit.normal) * 2.0;
         }
         else
         {
