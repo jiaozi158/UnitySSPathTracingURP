@@ -122,7 +122,7 @@ Material:
     - _DITHERING: 1
     - _DetailAlbedoMapScale: 1
     - _DetailNormalMapScale: 1
-    - _Dither_Intensity: 1
+    - _Dither_Intensity: 1.5
     - _DstBlend: 0
     - _DstBlendAlpha: 0
     - _EnvironmentReflections: 1

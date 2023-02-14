@@ -6,10 +6,10 @@
 // Can modify these quality presets according to your needs.
 // The unit of float values below is Unity unit (meter by default).
 //===================================================================================================================================
-// MARCHING_THICKNESS : It's the "Thickness / Error Tolerance" in ray marching.
+// MARCHING_THICKNESS : It's the initial "Thickness / Error Tolerance" in ray marching.
 //                      Increasing this may improve performance but reduce the accuracy of ray intersection test.
 // 
-// STEP_SIZE          : The ray's marching step size.
+// STEP_SIZE          : The ray's initial marching step size.
 //                      Increasing this may improve performance but reduce the accuracy of ray intersection test.
 //
 // MAX_STEP           : The maximum marching steps of each ray.
@@ -28,20 +28,20 @@
 //                      In this case, consider using Temporal-AA (in URP 15, 2023.1.0a20+) or Accumulation Renderer Feature to denoise?
 //===================================================================================================================================
 #if defined(_RAY_MARCHING_MEDIUM)
-    #define MARCHING_THICKNESS    0.1
-    #define STEP_SIZE             0.35
-    #define MAX_STEP              64
+    #define MARCHING_THICKNESS    0.075
+    #define STEP_SIZE             0.25
+    #define MAX_STEP              48
     #define RAY_BIAS              0.001
     #define RAY_BOUNCE            4
 #elif defined(_RAY_MARCHING_HIGH)
     #define MARCHING_THICKNESS    0.05
     #define STEP_SIZE             0.2
-    #define MAX_STEP              192
+    #define MAX_STEP              64
     #define RAY_BIAS              0.001
     #define RAY_BOUNCE            5
 #else //defined(_RAY_MARCHING_LOW)
     #define MARCHING_THICKNESS    0.1
-    #define STEP_SIZE             0.4
+    #define STEP_SIZE             0.3
     #define MAX_STEP              32
     #define RAY_BIAS              0.001
     #define RAY_BOUNCE            3
@@ -237,6 +237,7 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
     RayHit rayHit;
 
     half stepSize = STEP_SIZE;
+    half marchingThickness = MARCHING_THICKNESS;
     // (Safety Distance) Push the ray's marching origin to a position that is near the intersection when in first bounce.
     half accumulatedStep = isFirstBounce ? (length(positionWS - cameraPositionWS) - STEP_SIZE) : 0.0;
 
@@ -253,7 +254,8 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
 
         float3 rayPositionNDC = ComputeNormalizedDeviceCoordinatesWithZ(rayPositionWS, GetWorldToHClipMatrix());
 
-        float sceneDepth = -LinearEyeDepth(SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_CameraDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r, _ZBufferParams); // z buffer depth
+        float deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_CameraDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
+        float sceneDepth = -LinearEyeDepth(deviceDepth, _ZBufferParams); // z buffer depth
 
 #if (UNITY_REVERSED_Z == 0) // OpenGL platforms
         rayPositionNDC.z = rayPositionNDC.z * 0.5 + 0.5; // -1..1 to 0..1
@@ -280,10 +282,18 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
         if (!isScreenSpace)
             break;
 
+        bool isSky; // Do not reflect sky, the reflection probe fallback will provide better visual quality.
+    #if (UNITY_REVERSED_Z == 1)
+        isSky = deviceDepth == 0.0 ? true : false;
+    #else
+        isSky = deviceDepth == 1.0 ? true : false; // OpenGL Platforms.
+    #endif
+
         // 1. isScreenSpace
         // 2. hitDepth <= sceneDepth
-        // 3. sceneDepth < hitDepth + MARCHING_THICKNESS
-        if (isScreenSpace && abs(depthDiff) <= MARCHING_THICKNESS)
+        // 3. sceneDepth < hitDepth + marchingThickness
+        // 4. not isSky
+        if (isScreenSpace && abs(depthDiff) <= marchingThickness && !isSky)
         {
             rayHit.position = rayPositionWS;
             rayHit.distance = length(rayPositionWS - ray.position);
@@ -306,6 +316,15 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
 
             HitSurfaceDataFromGBuffer(rayPositionNDC.xy, rayHit.albedo, rayHit.specular, rayHit.normal, rayHit.emission, rayHit.smoothness);
             break;
+        }
+        // [Optimization] Exponentially increase the stepSize when the ray hasn't passed through the intersection.
+        // From https://blog.voxagon.se/2018/01/03/screen-space-path-tracing-diffuse.html
+        // The "1.33" is the exponential constant, which should be above "1.0".
+        else if (!startBinarySearch)
+        {
+            // As the distance increases, the accuracy of ray intersection test becomes less important.
+            stepSize *= 1.33;
+            marchingThickness *= 1.33;
         }
 
         // Update last step's depth difference.
