@@ -132,7 +132,10 @@ public class PathTracingForwardGBuffer : ScriptableRendererFeature
             // [OpenGL] Reusing the depth buffer seems to cause black glitching artifacts, so clear the existing depth.
             bool isOpenGL = (SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3) || (SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLCore); // GLES 2 is deprecated.
             if (isOpenGL)
-                ConfigureClear(ClearFlag.Depth, Color.black);
+                ConfigureClear(ClearFlag.Color | ClearFlag.Depth, Color.black);
+            else
+                // We have to also clear previous color so that the "background" will remain empty (black) when moving the camera.
+                ConfigureClear(ClearFlag.Color, Color.clear);
 
             // Reduce GBuffer overdraw using the depth from opaque pass. (excluding OpenGL platforms)
             if (!isOpenGL && (renderingData.cameraData.renderType == CameraRenderType.Base || renderingData.cameraData.clearDepth))
