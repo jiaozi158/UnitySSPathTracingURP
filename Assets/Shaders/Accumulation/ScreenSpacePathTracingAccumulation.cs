@@ -10,6 +10,8 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     [Header("Camera Accumulation")]
     [Tooltip("The material of accumulation shader.")]
     public Material m_Material;
+    [Tooltip("Add a progress bar to show the accumulation progress.")]
+    public bool progressBar = true;
     private const string m_AccumulationShaderName = "Hidden/AccumulateFrame";
     private AccumulationPass m_AccumulationPass;
 
@@ -39,6 +41,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             // Before post-processing is suggested because of the Render Scale and Upscaling.
             m_AccumulationPass.renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
         }
+        m_AccumulationPass.m_ProgressBar = progressBar;
     }
 
     protected override void Dispose(bool disposing)
@@ -62,6 +65,8 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
         private Material m_Material;
         private RTHandle m_AccumulateColorHandle;
+
+        public bool m_ProgressBar;
 
         // Reset the accumulation when scene has changed.
         // This is not perfect because we cannot detect per mesh changes or per light changes.
@@ -138,17 +143,21 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
                 // If the HDR precision is set to 64 Bits, the maximum sample can be 2048.
                 UnityEngine.Experimental.Rendering.GraphicsFormat currentGraphicsFormat = m_AccumulateColorHandle.rt.graphicsFormat;
-                int maxSample = currentGraphicsFormat == UnityEngine.Experimental.Rendering.GraphicsFormat.B10G11R11_UFloatPack32 ? 256 : 2048;
+                int maxSample = currentGraphicsFormat == UnityEngine.Experimental.Rendering.GraphicsFormat.B10G11R11_UFloatPack32 ? 64 : 512;
+                m_Material.SetFloat("_MaxSample", maxSample);
                 if (sample < maxSample)
                     sample++;
 
-                //Using Blitter is better because it supports XR, dig deeper later.
-
-                //m_Material.SetTexture("_MainTex", renderingData.cameraData.renderer.cameraColorTargetHandle);
+                // Using Blitter is better because it supports XR, dig deeper later.
+                /*
+                m_Material.SetTexture("_MainTex", renderingData.cameraData.renderer.cameraColorTargetHandle);
                 // Load & Store actions are important to support acculumation.
-                //Blitter.BlitCameraTexture(cmd, renderingData.cameraData.renderer.cameraColorTargetHandle, m_AccumulateColorHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, m_Material, 0);
-                //Blitter.BlitCameraTexture(cmd, m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle);
-
+                Blitter.BlitCameraTexture(cmd, renderingData.cameraData.renderer.cameraColorTargetHandle, m_AccumulateColorHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, m_Material, 0);
+                if (m_ProgressBar == true)
+                    Blitter.BlitCameraTexture(cmd, m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle, m_Material, 1);
+                else
+                    Blitter.BlitCameraTexture(cmd, m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle);
+                */
 
                 ///*
                 // Load & Store actions are important to support acculumation.
@@ -160,7 +169,10 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
                 RenderBufferLoadAction.DontCare,
                 RenderBufferStoreAction.DontCare);
                 cmd.Blit(renderingData.cameraData.renderer.cameraColorTargetHandle.rt, m_AccumulateColorHandle, m_Material, 0);
-                cmd.Blit(m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle);
+                if (m_ProgressBar == true)
+                    cmd.Blit(m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle.rt, m_Material, 1);
+                else
+                    cmd.Blit(m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle);
                 //*/
 
             }
