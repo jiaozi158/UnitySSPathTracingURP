@@ -40,7 +40,7 @@
     #define RAY_BIAS              0.001
     #define RAY_BOUNCE            5
 #else //defined(_RAY_MARCHING_LOW)
-    #define MARCHING_THICKNESS    0.1
+    #define MARCHING_THICKNESS    0.125
     #define STEP_SIZE             0.3
     #define MAX_STEP              32
     #define RAY_BIAS              0.001
@@ -89,6 +89,9 @@ FRAMEBUFFER_INPUT_HALF(GBUFFER2);
 
 // Helper functions
 //===================================================================================================================================
+TEXTURE2D(_CameraBackDepthTexture);
+SAMPLER(sampler_CameraBackDepthTexture);
+
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/BRDF.hlsl"
 
 #ifndef kDielectricSpec
@@ -289,11 +292,33 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
         isSky = deviceDepth == 1.0 ? true : false; // OpenGL Platforms.
     #endif
 
+        bool hitSuccessful;
         // 1. isScreenSpace
         // 2. hitDepth <= sceneDepth
-        // 3. sceneDepth < hitDepth + marchingThickness
-        // 4. not isSky
-        if (isScreenSpace && abs(depthDiff) <= marchingThickness && !isSky)
+        // 3. sceneDepth < hitDepth + MARCHING_THICKNESS
+        // 4. hitDepth >= sceneBackDepth
+        UNITY_BRANCH
+        if (_BackDepthEnabled == 1.0)
+        {
+            float sceneBackDepth = -LinearEyeDepth(SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, sampler_CameraBackDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r, _ZBufferParams); // z buffer back depth
+
+            bool backDepthValid; // Avoid infinite thickness for objects with no thickness (ex. Plane).
+        #if (UNITY_REVERSED_Z == 1)
+            backDepthValid = sceneBackDepth != 0.0 ? true : false;
+        #else
+            backDepthValid = sceneBackDepth != 1.0 ? true : false; // OpenGL Platforms.
+        #endif
+
+            // Ignore the incorrect "backDepthDiff" when objects (ex. Plane with front face only) has no thickness and blocks the backface depth rendering of objects behind it.
+            float backDepthDiff = (sceneBackDepth <= sceneDepth) ? hitDepth - sceneBackDepth : depthDiff;
+            hitSuccessful = (isScreenSpace && (depthDiff <= marchingThickness) && (backDepthDiff >= -marchingThickness) && backDepthValid && !isSky) ? true : false;
+        }
+        else
+        {
+            hitSuccessful = (isScreenSpace && (depthDiff <= marchingThickness) && (depthDiff >= -marchingThickness) && !isSky) ? true : false;
+        }
+
+        if (hitSuccessful)
         {
             rayHit.position = rayPositionWS;
             rayHit.distance = length(rayPositionWS - ray.position);

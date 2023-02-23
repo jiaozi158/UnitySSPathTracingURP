@@ -151,7 +151,7 @@ Shader "Hidden/AccumulateFrame"
 			half4 frag(Varyings input) : SV_Target
 			{
 				half3 color = SAMPLE_TEXTURE2D_LOD(_MainTex, my_point_clamp_sampler, input.uv, 0).rgb;
-				AddConvergenceCue(input.uv, (_Sample + 1.0), color);
+				AddConvergenceCue(input.uv, _Sample, color);
 				return half4(color, 1.0);
 			}
 			ENDHLSL

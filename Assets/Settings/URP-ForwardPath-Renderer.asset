@@ -55,7 +55,7 @@ MonoBehaviour:
     zFailOperation: 0
   m_ShadowTransparentReceive: 1
   m_RenderingMode: 0
-  m_DepthPrimingMode: 0
+  m_DepthPrimingMode: 1
   m_CopyDepthMode: 0
   m_AccurateGbufferNormals: 0
   m_IntermediateTextureMode: 1
@@ -72,7 +72,13 @@ MonoBehaviour:
   m_Name: ScreenSpacePathTracingAccumulation
   m_EditorClassIdentifier: 
   m_Active: 1
-  m_Material: {fileID: 2100000, guid: a520a9b2af6fc3745bd876fdda690cc3, type: 2}
+  m_AccumulationMaterial: {fileID: 2100000, guid: a520a9b2af6fc3745bd876fdda690cc3,
+    type: 2}
+  m_PathTracingMaterial: {fileID: 2100000, guid: a67291bbecb6c2649ba10a01f0af3ccc,
+    type: 2}
+  accurateThickness: 1
+  accumulation: 1
+  progressBar: 1
 --- !u!114 &7248218767805662722
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -86,6 +92,9 @@ MonoBehaviour:
   m_Name: PathTracingForwardGBuffer
   m_EditorClassIdentifier: 
   m_Active: 1
+  PassEvent: 300
+  PassNames:
+  - UniversalGBuffer
 --- !u!114 &7577151689894911607
 MonoBehaviour:
   m_ObjectHideFlags: 0

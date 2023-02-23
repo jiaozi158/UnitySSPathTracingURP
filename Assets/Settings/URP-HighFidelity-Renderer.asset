@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!114 &-7163438884457882376
+--- !u!114 &-8256752480756791312
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -33,9 +33,9 @@ MonoBehaviour:
       type: 3}
   m_RendererFeatures:
   - {fileID: 3982393931211024189}
-  - {fileID: 9011213389551791958}
-  - {fileID: -7163438884457882376}
-  m_RendererFeatureMap: 3d2781492e4e4437566f7a97d5420e7df8dcaac1495a969c
+  - {fileID: 8651064045438619718}
+  - {fileID: -8256752480756791312}
+  m_RendererFeatureMap: 3d2781492e4e443746d085fde9c00e78f0872a6a5d1f6a8d
   m_UseNativeRenderPass: 0
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
   xrSystemData: {fileID: 11400000, guid: 60e1133243b97e347b653163a8c01b64, type: 2}
@@ -92,7 +92,7 @@ MonoBehaviour:
   injectionPoint: 450
   requirements: 4
   passIndex: 0
---- !u!114 &9011213389551791958
+--- !u!114 &8651064045438619718
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -105,4 +105,10 @@ MonoBehaviour:
   m_Name: ScreenSpacePathTracingAccumulation
   m_EditorClassIdentifier: 
   m_Active: 1
-  m_Material: {fileID: 2100000, guid: a520a9b2af6fc3745bd876fdda690cc3, type: 2}
+  m_AccumulationMaterial: {fileID: 2100000, guid: a520a9b2af6fc3745bd876fdda690cc3,
+    type: 2}
+  m_PathTracingMaterial: {fileID: 2100000, guid: a67291bbecb6c2649ba10a01f0af3ccc,
+    type: 2}
+  accurateThickness: 1
+  accumulation: 1
+  progressBar: 1

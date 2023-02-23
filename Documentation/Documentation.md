@@ -39,6 +39,13 @@ In order to avoid double environment lighting, please disable Environment Reflec
 
  ![Disable_All_Materials_EnvironmentReflection](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/Settings/Disable_All_Materials_EnvironmentReflection.png)
 
+Extensions
+-------------
+
+Accurate Thickness: Render the backface depth of scene geometries to improve the accuracy of screen space path tracing.
+
+ ![AccurateThickness](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/Settings/AccurateThickness.png)
+
 Details
 -------------
 

@@ -11,21 +11,29 @@ UnitySSPathTracingURP
  
 Screenshots
 ------------
-**(BoxScene)**
+**(BoxScene + Reflection Probe Fallback)**
 
- ![MixedLighting](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/URP_ScreenSpacePathTracing_MixedLighting.jpg)
+ ![ProbeFallBackOn1](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/ProbeFallBack1.jpg)
 
- ![WithoutAccumulation](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/URP_ScreenSpacePathTracing_Moving.jpg)
+ ![ProbeFallBackOn2](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/ProbeFallBack2.jpg)
 
- ![WithAccumulation](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/URP_ScreenSpacePathTracing.jpg)
+ ![ProbeFallBackOn3](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/EmissionFromReflectionProbe.jpg)
 
-**(Enable Reflection Probe Fallback)**
+ ![Converged](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/URP_ScreenSpacePathTracing.jpg)
 
- ![ProbeFallBackOn1](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/ProbeFallBack.jpg)
-
- ![ProbeFallBackOn2](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/EmissionFromReflectionProbe.jpg)
+ ![Moving](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/URP_ScreenSpacePathTracing_Moving.jpg)
 
  **Note:** Enable URP Temporal Anti-aliasing is important for improving stability. (exists since latest URP 14)
+
+**(Not Included)**
+
+[Classroom](https://www.blender.org/download/demo-files/) by Christophe Seux (CC0)
+
+ ![Classroom](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/Others/Classroom.jpg)
+
+[Stormtrooper Star Wars VII](https://www.blendswap.com/blend/13953) by ScottGraham (CC-BY-3.0)
+
+ ![StormTrooper](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/Others/StormTrooper.jpg)
 
 Documentation
 ------------
