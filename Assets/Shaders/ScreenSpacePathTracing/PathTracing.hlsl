@@ -234,6 +234,35 @@ RayHit InitializeRayHit()
     return rayHit;
 }
 
+// [Under easiest license] Modified from "https://github.com/tuxalin/vulkanri/blob/master/examples/pbr_ibl/shaders/importanceSampleGGX.glsl".
+// GGX NDF via importance sampling
+// 
+// It's a GGX weighted sample hemisphere function.
+half3 ImportanceSampleGGX(float2 random, half3 normal, half smoothness)
+{
+    half roughness = (1.0 - smoothness); // This requires perceptual roughness, not roughness [(1.0 - smoothness) * (1.0 - smoothness)].
+    half alpha = roughness * roughness;
+    half alpha2 = alpha * alpha;
+
+    half phi = 2.0 * PI * random.x;
+    half cosTheta = sqrt((1.0 - random.y) / (1.0 + (alpha2 - 1.0) * random.y));
+    half sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+
+    // from spherical coordinates to cartesian coordinates
+    half3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = sin(phi) * sinTheta;
+    H.z = cosTheta;
+
+    // from tangent-space vector to world-space sample vector
+    half3 up = abs(normal.z) < 0.999 ? half3(0.0, 0.0, 1.0) : half3(1.0, 0.0, 0.0);
+    half3 tangent = normalize(cross(up, normal));
+    half3 bitangent = cross(normal, tangent);
+
+    half3 sampleVec = tangent * H.x + bitangent * H.y + normal * H.z;
+    return normalize(sampleVec);
+}
+
 // If no intersection, "rayHit.distance" will remain "REAL_EPS".
 RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 screenUV = float2(0.5, 0.5), float3 positionWS = float3(1.0, 1.0, 1.0), float3 cameraPositionWS = float3(0.0, 0.0, 0.0))
 {
@@ -253,7 +282,7 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
     {
         accumulatedStep += (stepSize + stepSize * dither);
 
-        float3 rayPositionWS = ray.position + accumulatedStep * ray.direction;
+        float3 rayPositionWS = ray.position + accumulatedStep * -ray.direction; // here we need viewDirectionWS
 
         float3 rayPositionNDC = ComputeNormalizedDeviceCoordinatesWithZ(rayPositionWS, GetWorldToHClipMatrix());
 
@@ -310,8 +339,15 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
         #endif
 
             // Ignore the incorrect "backDepthDiff" when objects (ex. Plane with front face only) has no thickness and blocks the backface depth rendering of objects behind it.
-            float backDepthDiff = (sceneBackDepth <= sceneDepth) ? hitDepth - sceneBackDepth : depthDiff;
-            hitSuccessful = (isScreenSpace && (depthDiff <= marchingThickness) && (backDepthDiff >= -marchingThickness) && backDepthValid && !isSky) ? true : false;
+            if (sceneBackDepth <= sceneDepth)
+            {
+                float backDepthDiff = hitDepth - sceneBackDepth;
+                hitSuccessful = (isScreenSpace && (depthDiff <= 0.0) && (backDepthDiff >= 0.0) && backDepthValid && !isSky) ? true : false;
+            }
+            else
+            {
+                hitSuccessful = (isScreenSpace && (depthDiff <= marchingThickness) && (depthDiff >= -marchingThickness) && !isSky) ? true : false;
+            }
         }
         else
         {
@@ -373,23 +409,25 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
         half roulette = random.z;
 
         // Fresnel effect
-        half fresnel = F_Schlick(0.04, max(rayHit.smoothness, 0.04), saturate(dot(rayHit.normal, ray.direction)));
+        half fresnel = F_Schlick(0.04, max(rayHit.smoothness, 0.04), saturate(dot(rayHit.normal, -ray.direction)));
 
         if (specChance > 0 && roulette < specChance + fresnel)
         {
-            // Specular reflection
-            ray.direction = normalize(lerp(-SampleHemisphereCosine(random.x, random.y, rayHit.normal), reflect(ray.direction, rayHit.normal), rayHit.smoothness));
+            // Specular reflection BRDF
+            ray.direction = reflect(ray.direction, ImportanceSampleGGX(random.xy, rayHit.normal, rayHit.smoothness)); // Linear interpolation (lerp) doesn't match the actual specular lobes at all.
             ray.position = rayHit.position + ray.direction * RAY_BIAS;
+            // BRDF * cosTheta / PDF
+            // [specular / dot(N, L)] * dot(N, L) / 1.0
             ray.energy *= rcp(specChance) * rayHit.specular;
         }
         else if (diffChance > 0 && roulette < diffChance + fresnel)
         {
-            // Diffuse reflection
-            ray.direction = -SampleHemisphereCosine(random.x, random.y, rayHit.normal); // The random direction here needs an inversion to match the reference, what happened?
+            // Diffuse reflection BRDF
+            ray.direction = SampleHemisphereCosine(random.x, random.y, rayHit.normal);
             ray.position = rayHit.position + ray.direction * RAY_BIAS;
             // BRDF * cosTheta / PDF
             // (albedo / PI) * dot(N, L) / (2.0 * PI)
-            ray.energy *= rcp(diffChance) * rayHit.albedo * dot(-ray.direction, rayHit.normal) * 2.0;
+            ray.energy *= rcp(diffChance) * rayHit.albedo * dot(ray.direction, rayHit.normal) * 2.0;
         }
         else
         {
@@ -418,14 +456,14 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
             UNITY_BRANCH
             if (_SpecCube0_ProbePosition.w > 0) // Box Projection Probe
             {
-                float3 factors = ((-ray.direction > 0 ? _SpecCube0_BoxMax.xyz : _SpecCube0_BoxMin.xyz) - positionWS) / -ray.direction;
+                float3 factors = ((ray.direction > 0 ? _SpecCube0_BoxMax.xyz : _SpecCube0_BoxMin.xyz) - positionWS) / ray.direction;
                 float scalar = min(min(factors.x, factors.y), factors.z);
-                float3 uvw = -ray.direction * scalar + (positionWS - _SpecCube0_ProbePosition.xyz);
+                float3 uvw = ray.direction * scalar + (positionWS - _SpecCube0_ProbePosition.xyz);
                 color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, uvw, 1), _SpecCube0_HDR).rgb * _Exposure; // "mip level 1" will provide a less noisy result.
             }
             else
             {
-                color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, -ray.direction, 1), _SpecCube0_HDR).rgb * _Exposure;
+                color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, ray.direction, 1), _SpecCube0_HDR).rgb * _Exposure;
             }
 
             UNITY_BRANCH
@@ -435,14 +473,14 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
                 UNITY_BRANCH
                 if (_SpecCube1_ProbePosition.w > 0) // Box Projection Probe
                 {
-                    float3 factors = ((-ray.direction > 0 ? _SpecCube1_BoxMax.xyz : _SpecCube1_BoxMin.xyz) - positionWS) / -ray.direction;
+                    float3 factors = ((ray.direction > 0 ? _SpecCube1_BoxMax.xyz : _SpecCube1_BoxMin.xyz) - positionWS) / ray.direction;
                     float scalar = min(min(factors.x, factors.y), factors.z);
-                    float3 uvw = -ray.direction * scalar + (positionWS - _SpecCube1_ProbePosition.xyz);
+                    float3 uvw = ray.direction * scalar + (positionWS - _SpecCube1_ProbePosition.xyz);
                     probe2Color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube1, sampler_SpecCube1, uvw, 1), _SpecCube1_HDR).rgb * _Exposure;
                 }
                 else
                 {
-                    probe2Color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube1, sampler_SpecCube1, -ray.direction, 1), _SpecCube1_HDR).rgb * _Exposure;
+                    probe2Color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube1, sampler_SpecCube1, ray.direction, 1), _SpecCube1_HDR).rgb * _Exposure;
                 }
                 // Blend the probes if necessary.
                 color = lerp(color, probe2Color, _ProbeWeight).rgb;
@@ -450,7 +488,7 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
         }
         
     #else
-        color = SAMPLE_TEXTURECUBE_LOD(_Static_Lighting_Sky, sampler_Static_Lighting_Sky, -ray.direction, 0).rgb * _Exposure;
+        color = SAMPLE_TEXTURECUBE_LOD(_Static_Lighting_Sky, sampler_Static_Lighting_Sky, ray.direction, 0).rgb * _Exposure;
     #endif
         return color;
 
@@ -491,7 +529,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
     {
         Ray ray;
         ray.position = cameraPositionWS;
-        ray.direction = viewDirectionWS;
+        ray.direction = -viewDirectionWS; // viewDirectionWS points to the camera.
         ray.energy = half3(1.0, 1.0, 1.0);
 
         float time = unity_DeltaTime.y * _Time.y;
