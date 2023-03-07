@@ -23,7 +23,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     public Material m_PathTracingMaterial;
 
     [Header("Path Tracing Extensions")]
-    [Tooltip("Render the backface depth of scene geometries. This improves the accuracy of screen space path tracing.")]
+    [Tooltip("Render the backface depth of scene geometries. This improves the accuracy of screen space path tracing, but may not work well in scenes with lots of single-sided objects.")]
     public bool accurateThickness = false;
 
     [Header("Accumulation")]
@@ -221,18 +221,21 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
                 ///*
                 // Load & Store actions are important to support acculumation.
-                cmd.SetRenderTarget(
-                m_AccumulateColorHandle,
-                RenderBufferLoadAction.Load,
-                RenderBufferStoreAction.Store,
-                m_AccumulateColorHandle,
-                RenderBufferLoadAction.DontCare,
-                RenderBufferStoreAction.DontCare);
-                cmd.Blit(renderingData.cameraData.renderer.cameraColorTargetHandle.rt, m_AccumulateColorHandle, m_AccumulationMaterial, 0);
-                if (m_ProgressBar == true)
-                    cmd.Blit(m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle.rt, m_AccumulationMaterial, 1);
-                else
-                    cmd.Blit(m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle);
+                if (m_Accumulation == Accumulation.Camera)
+                {
+                    cmd.SetRenderTarget(
+                    m_AccumulateColorHandle,
+                    RenderBufferLoadAction.Load,
+                    RenderBufferStoreAction.Store,
+                    m_AccumulateColorHandle,
+                    RenderBufferLoadAction.DontCare,
+                    RenderBufferStoreAction.DontCare);
+                    cmd.Blit(renderingData.cameraData.renderer.cameraColorTargetHandle.rt, m_AccumulateColorHandle, m_AccumulationMaterial, 0);
+                    if (m_ProgressBar == true)
+                        cmd.Blit(m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle.rt, m_AccumulationMaterial, 1);
+                    else
+                        cmd.Blit(m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle);
+                }
                 //*/
 
             }

@@ -27,6 +27,10 @@ Screenshots
 
 **(Not Included)**
 
+Original Cornell Box
+
+ ![OriginalCornellBox](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/Others/OriginalCornellBox.jpg)
+
 [Classroom](https://www.blender.org/download/demo-files/) by Christophe Seux (CC0)
 
  ![Classroom](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/Others/Classroom.jpg)

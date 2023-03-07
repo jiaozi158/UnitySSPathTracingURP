@@ -6,21 +6,21 @@
 // Can modify these quality presets according to your needs.
 // The unit of float values below is Unity unit (meter by default).
 //===================================================================================================================================
-// MARCHING_THICKNESS : It's the initial "Thickness / Error Tolerance" in ray marching.
-//                      Increasing this may improve performance but reduce the accuracy of ray intersection test.
-// 
 // STEP_SIZE          : The ray's initial marching step size.
 //                      Increasing this may improve performance but reduce the accuracy of ray intersection test.
 //
 // MAX_STEP           : The maximum marching steps of each ray.
 //                      Increasing this may decrease performance but allows the ray to travel further. (if not decreasing STEP_SIZE)
 // 
+// RAY_BOUNCE         : The maximum number of times each ray bounces. (should be at least 1)
+//                      Increasing this may decrease performance but is necessary for recursive reflections.
+//
+// MARCHING_THICKNESS : The approximate thickness of scene objects.
+//                      This will be also be the fallback thickness when enabling "Accurate Thickness" in renderer feature.
+// 
 // RAY_BIAS           : The bias applied to ray's hit position to avoid self-intersection with hit position.
 //                      Usually no need to adjust it.
 // 
-// RAY_BOUNCE         : The maximum number of times each ray can bounce. (should be at least 1)
-//                      Increasing this may decrease performance but is necessary for recursive reflections.
-//
 // RAY_COUNT          : The number of rays generated per pixel. (Samples Per Pixel)
 //                      Increasing this may significantly decrease performance but will provide a more convergent result when moving camera. (less noise)
 // 
@@ -28,26 +28,22 @@
 //                      In this case, consider using Temporal-AA (in URP 15, 2023.1.0a20+) or Accumulation Renderer Feature to denoise?
 //===================================================================================================================================
 #if defined(_RAY_MARCHING_MEDIUM)
-    #define MARCHING_THICKNESS    0.075
-    #define STEP_SIZE             0.25
-    #define MAX_STEP              48
-    #define RAY_BIAS              0.001
-    #define RAY_BOUNCE            4
+#define STEP_SIZE             0.25
+#define MAX_STEP              48
+#define RAY_BOUNCE            4
 #elif defined(_RAY_MARCHING_HIGH)
-    #define MARCHING_THICKNESS    0.05
-    #define STEP_SIZE             0.2
-    #define MAX_STEP              64
-    #define RAY_BIAS              0.001
-    #define RAY_BOUNCE            5
+#define STEP_SIZE             0.2
+#define MAX_STEP              64
+#define RAY_BOUNCE            5
 #else //defined(_RAY_MARCHING_LOW)
-    #define MARCHING_THICKNESS    0.125
-    #define STEP_SIZE             0.3
-    #define MAX_STEP              32
-    #define RAY_BIAS              0.001
-    #define RAY_BOUNCE            3
+#define STEP_SIZE             0.3
+#define MAX_STEP              32
+#define RAY_BOUNCE            3
 #endif
 // Global quality settings.
-    #define RAY_COUNT             1
+#define MARCHING_THICKNESS    0.15
+#define RAY_BIAS              0.001
+#define RAY_COUNT             1
 //===================================================================================================================================
 
 // Do not change, from URP's GBuffer hlsl.
@@ -237,7 +233,7 @@ RayHit InitializeRayHit()
 // [Under easiest license] Modified from "https://github.com/tuxalin/vulkanri/blob/master/examples/pbr_ibl/shaders/importanceSampleGGX.glsl".
 // GGX NDF via importance sampling
 // 
-// It's a GGX weighted sample hemisphere function.
+// It modifies the normal direction based on surface smoothness.
 half3 ImportanceSampleGGX(float2 random, half3 normal, half smoothness)
 {
     half roughness = (1.0 - smoothness); // This requires perceptual roughness, not roughness [(1.0 - smoothness) * (1.0 - smoothness)].
@@ -280,7 +276,7 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
     UNITY_LOOP
     for (int i = 1; i <= MAX_STEP; i++)
     {
-        accumulatedStep += (stepSize + stepSize * dither);
+        accumulatedStep += isFirstBounce ? stepSize : (stepSize + stepSize * dither);
 
         float3 rayPositionWS = ray.position + accumulatedStep * -ray.direction; // here we need viewDirectionWS
 
@@ -329,29 +325,29 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
         UNITY_BRANCH
         if (_BackDepthEnabled == 1.0)
         {
-            float sceneBackDepth = -LinearEyeDepth(SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, sampler_CameraBackDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r, _ZBufferParams); // z buffer back depth
+            float deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, sampler_CameraBackDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
+            float sceneBackDepth = -LinearEyeDepth(deviceBackDepth, _ZBufferParams); // z buffer back depth
 
             bool backDepthValid; // Avoid infinite thickness for objects with no thickness (ex. Plane).
         #if (UNITY_REVERSED_Z == 1)
-            backDepthValid = sceneBackDepth != 0.0 ? true : false;
+            backDepthValid = deviceBackDepth != 0.0 ? true : false;
         #else
-            backDepthValid = sceneBackDepth != 1.0 ? true : false; // OpenGL Platforms.
+            backDepthValid = deviceBackDepth != 1.0 ? true : false; // OpenGL Platforms.
         #endif
 
             // Ignore the incorrect "backDepthDiff" when objects (ex. Plane with front face only) has no thickness and blocks the backface depth rendering of objects behind it.
-            if (sceneBackDepth <= sceneDepth)
+            if ((sceneBackDepth <= sceneDepth) && backDepthValid)
             {
-                float backDepthDiff = hitDepth - sceneBackDepth;
-                hitSuccessful = (isScreenSpace && (depthDiff <= 0.0) && (backDepthDiff >= 0.0) && backDepthValid && !isSky) ? true : false;
+                hitSuccessful = (isScreenSpace && (depthDiff <= 0.0) && (hitDepth - sceneBackDepth >= 0.01) && !isSky) ? true : false;
             }
             else
             {
-                hitSuccessful = (isScreenSpace && (depthDiff <= marchingThickness) && (depthDiff >= -marchingThickness) && !isSky) ? true : false;
+                hitSuccessful = (isScreenSpace && (depthDiff <= 0.0) && (depthDiff >= -marchingThickness) && !isSky) ? true : false;
             }
         }
         else
         {
-            hitSuccessful = (isScreenSpace && (depthDiff <= marchingThickness) && (depthDiff >= -marchingThickness) && !isSky) ? true : false;
+            hitSuccessful = (isScreenSpace && (depthDiff <= 0.0) && (depthDiff >= -marchingThickness) && !isSky) ? true : false;
         }
 
         if (hitSuccessful)
@@ -426,7 +422,7 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
             ray.direction = SampleHemisphereCosine(random.x, random.y, rayHit.normal);
             ray.position = rayHit.position + ray.direction * RAY_BIAS;
             // BRDF * cosTheta / PDF
-            // (albedo / PI) * dot(N, L) / (2.0 * PI)
+            // (albedo / PI) * dot(N, L) / [1.0 / (2.0 * PI)]
             ray.energy *= rcp(diffChance) * rayHit.albedo * dot(ray.direction, rayHit.normal) * 2.0;
         }
         else
