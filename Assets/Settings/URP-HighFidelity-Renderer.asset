@@ -112,3 +112,4 @@ MonoBehaviour:
   accurateThickness: 1
   accumulation: 1
   progressBar: 1
+  denoiserIntensity: 0.5

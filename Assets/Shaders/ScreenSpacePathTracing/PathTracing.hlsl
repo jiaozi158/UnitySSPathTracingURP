@@ -293,9 +293,35 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
 
         float depthDiff = hitDepth - sceneDepth;
 
+        float deviceBackDepth;
+        float sceneBackDepth;
+        float backDepthDiff;
+        UNITY_BRANCH
+        if (_BackDepthEnabled == 1.0)
+        {
+            deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, sampler_CameraBackDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
+            sceneBackDepth = -LinearEyeDepth(deviceBackDepth, _ZBufferParams); // z buffer back depth
+
+            bool backDepthValid; // Avoid infinite thickness for objects with no thickness (ex. Plane).
+    #if (UNITY_REVERSED_Z == 1)
+            backDepthValid = deviceBackDepth != 0.0 ? true : false;
+    #else
+            backDepthValid = deviceBackDepth != 1.0 ? true : false; // OpenGL Platforms.
+    #endif
+
+            if ((sceneBackDepth <= sceneDepth) && backDepthValid)
+                backDepthDiff = -(hitDepth - sceneBackDepth);
+            else
+                backDepthDiff = depthDiff + marchingThickness;
+        }
+
         // Sign is positive : ray is in front of the actual intersection.
         // Sign is negative : ray is behind the actual intersection.
-        half Sign = sign(depthDiff);
+        half Sign;
+        if (hitDepth < sceneBackDepth)
+            Sign = sign(backDepthDiff);
+        else
+            Sign = sign(depthDiff);
         startBinarySearch = startBinarySearch || (Sign == -1) ? true : false; // Start binary search when the ray is behind the actual intersection.
 
         // Half the step size each time when binary search starts.
@@ -318,6 +344,7 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
     #endif
 
         bool hitSuccessful;
+        bool isBackHit = false;
         // 1. isScreenSpace
         // 2. hitDepth <= sceneDepth
         // 3. sceneDepth < hitDepth + MARCHING_THICKNESS
@@ -325,9 +352,6 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
         UNITY_BRANCH
         if (_BackDepthEnabled == 1.0)
         {
-            float deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, sampler_CameraBackDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
-            float sceneBackDepth = -LinearEyeDepth(deviceBackDepth, _ZBufferParams); // z buffer back depth
-
             bool backDepthValid; // Avoid infinite thickness for objects with no thickness (ex. Plane).
         #if (UNITY_REVERSED_Z == 1)
             backDepthValid = deviceBackDepth != 0.0 ? true : false;
@@ -338,7 +362,8 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
             // Ignore the incorrect "backDepthDiff" when objects (ex. Plane with front face only) has no thickness and blocks the backface depth rendering of objects behind it.
             if ((sceneBackDepth <= sceneDepth) && backDepthValid)
             {
-                hitSuccessful = (isScreenSpace && (depthDiff <= 0.0) && (hitDepth - sceneBackDepth >= 0.01) && !isSky) ? true : false;
+                hitSuccessful = (isScreenSpace && (depthDiff <= 0.0) && (hitDepth - sceneBackDepth >= 0.0) && !isSky) ? true : false;
+                isBackHit = (hitDepth > sceneBackDepth && Sign > 0.0) ? true : false;
             }
             else
             {
@@ -372,6 +397,12 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
             }
 
             HitSurfaceDataFromGBuffer(rayPositionNDC.xy, rayHit.albedo, rayHit.specular, rayHit.normal, rayHit.emission, rayHit.smoothness);
+
+            // Reverse the normal direction since it's a back face.
+            // Reuse the front face GBuffer to save performance.
+            if (isBackHit)
+                rayHit.normal = -rayHit.normal;
+
             break;
         }
         // [Optimization] Exponentially increase the stepSize when the ray hasn't passed through the intersection.

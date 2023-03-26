@@ -19,7 +19,11 @@ Screenshots
 
  ![ProbeFallBackOn3](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/EmissionFromReflectionProbe.jpg)
 
+Offline Accumulation
+
  ![Converged](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/URP_ScreenSpacePathTracing.jpg)
+
+Real-time Accumulation
 
  ![Moving](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/URP_ScreenSpacePathTracing_Moving.jpg)
 
