@@ -27,23 +27,27 @@
 //                      If you set this too high, the GPU Driver may restart and causing Unity to shut down. (swapchain error)
 //                      In this case, consider using Temporal-AA (in URP 15, 2023.1.0a20+) or Accumulation Renderer Feature to denoise?
 //===================================================================================================================================
-#if defined(_RAY_MARCHING_MEDIUM)
-#define STEP_SIZE             0.25
-#define MAX_STEP              48
-#define RAY_BOUNCE            4
-#elif defined(_RAY_MARCHING_HIGH)
-#define STEP_SIZE             0.2
-#define MAX_STEP              64
-#define RAY_BOUNCE            5
+#if defined(_RAY_MARCHING_HIGH)
+    #define STEP_SIZE             0.2
+    #define MAX_STEP              64
+    #define RAY_BOUNCE            5
+#elif defined(_RAY_MARCHING_MEDIUM)
+    #define STEP_SIZE             0.25
+    #define MAX_STEP              48
+    #define RAY_BOUNCE            4
+#elif defined(_RAY_MARCHING_VERY_LOW) // If the scene is quite "reflective", it is recommended to keep RAY_BOUNCE as 3 for a good look.
+    #define STEP_SIZE             0.4
+    #define MAX_STEP              16
+    #define RAY_BOUNCE            3
 #else //defined(_RAY_MARCHING_LOW)
-#define STEP_SIZE             0.3
-#define MAX_STEP              32
-#define RAY_BOUNCE            3
+    #define STEP_SIZE             0.3
+    #define MAX_STEP              32
+    #define RAY_BOUNCE            3
 #endif
 // Global quality settings.
-#define MARCHING_THICKNESS    0.15
-#define RAY_BIAS              0.001
-#define RAY_COUNT             1
+    #define MARCHING_THICKNESS    0.15
+    #define RAY_BIAS              0.001
+    #define RAY_COUNT             1
 //===================================================================================================================================
 
 // Do not change, from URP's GBuffer hlsl.
@@ -176,13 +180,14 @@ void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 
     specular = materialFlags == kMaterialFlagSpecularSetup ? gbuffer1.rgb : lerp(kDieletricSpec.rgb, max(albedo, kDieletricSpec.rgb), gbuffer1.r); // Specular & Metallic setup conversion
     specular = isForward ? half3(0.0, 0.0, 0.0) : specular;
 
-#ifdef _GBUFFER_NORMALS_OCT
-    half2 remappedOctNormalWS = half2(Unpack888ToFloat2(gbuffer2.rgb));          // values between [ 0, +1]
-    half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);          // values between [-1, +1]
-    normal = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
-#else
-    normal = gbuffer2.rgb;
-#endif
+    if (_GBUFFER_NORMALS_OCT_ON == true)
+    {
+        half2 remappedOctNormalWS = half2(Unpack888ToFloat2(gbuffer2.rgb));          // values between [ 0, +1]
+        half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);          // values between [-1, +1]
+        normal = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
+    }
+    else
+        normal = gbuffer2.rgb;
 
     emission = gbuffer3.rgb;
     smoothness = gbuffer2.a;
@@ -293,9 +298,9 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
 
         float depthDiff = hitDepth - sceneDepth;
 
-        float deviceBackDepth;
-        float sceneBackDepth;
-        float backDepthDiff;
+        float deviceBackDepth = 0.0;
+        float sceneBackDepth = 0.0;
+        float backDepthDiff = 0.0;
         UNITY_BRANCH
         if (_BackDepthEnabled == 1.0)
         {
@@ -310,7 +315,7 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
     #endif
 
             if ((sceneBackDepth <= sceneDepth) && backDepthValid)
-                backDepthDiff = -(hitDepth - sceneBackDepth);
+                backDepthDiff = sceneBackDepth - hitDepth; // -(hitDepth - sceneBackDepth)
             else
                 backDepthDiff = depthDiff + marchingThickness;
         }
@@ -527,7 +532,12 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
 {
     half dither = 0.0;
 #if defined(_DITHERING)
-    dither = (GenerateRandomValue(screenUV) * 2.0 - 1.0) * 0.1 * _Dither_Intensity; // Range from -0.1 to 0.1
+#if defined(_RAY_MARCHING_VERY_LOW)
+    // Double the dither intensity if ray marching quality is set to very low (large STEP_SIZE).
+    dither = (GenerateRandomValue(screenUV) * 0.4 - 0.2) * _Dither_Intensity; // Range from -0.2 to 0.2 (assuming intensity is 1)
+#else
+    dither = (GenerateRandomValue(screenUV) * 0.2 - 0.1) * _Dither_Intensity; // Range from -0.1 to 0.1 (assuming intensity is 1)
+#endif
 #endif
 
     // Avoid shader warning of using unintialized value.
@@ -626,6 +636,17 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
 
         }
     }
+
+    // Filter out negative color pixels here.
+    // There shouldn't be negative values since the smallest is 0.
+    // [To Be Confirmed] But the "URP Rendering Debugger" reported that the effect is outputting slightly negative values.
+    color = max(color, half3(0.001, 0.001, 0.001));
+}
+
+// Override for half precision graph.
+void EvaluateColor_half(float3 cameraPositionWS, half3 viewDirectionWS, float2 screenUV, float3 positionWS, bool isBackground, out half3 color)
+{
+    EvaluateColor_float(cameraPositionWS, viewDirectionWS, screenUV, positionWS, isBackground, color);
 }
 
 #endif

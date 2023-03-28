@@ -53,6 +53,7 @@ Requirements
 - Deferred rendering path (OpenGL will always in Forward path)
 - Forward rendering path ([need extra setup](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/ForwardPathSupport.md))
 - Multiple Render Targets support (at least OpenGL ES 3.0 or equivalent)
+- Lowering down the Render Scale (e.g. "0.5") on mobile devices and use upscaler (e.g. FSR 1.0) to reduce performance cost.
 
 License
 ------------

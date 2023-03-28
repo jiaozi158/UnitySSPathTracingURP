@@ -62,6 +62,9 @@
         },
         {
             "m_Id": "8f19e7146850471c9928b0c44adfc670"
+        },
+        {
+            "m_Id": "005c7efceb3442649564f886b4fde9a8"
         }
     ],
     "m_Keywords": [
@@ -70,9 +73,6 @@
         },
         {
             "m_Id": "1ea878323bfa4a8c84693464da12f273"
-        },
-        {
-            "m_Id": "60d49e824e904387bb9a00f1d9fba056"
         },
         {
             "m_Id": "20a054d88261409cae1cf0cd728526ec"
@@ -423,7 +423,7 @@
         "preventRotation": false
     },
     "m_Path": "Universal Render Pipeline",
-    "m_GraphPrecision": 1,
+    "m_GraphPrecision": 2,
     "m_PreviewMode": 2,
     "m_OutputNode": {
         "m_Id": ""
@@ -433,6 +433,29 @@
             "m_Id": "13cd69f4f5b246c3b57d7fcb652cdc7c"
         }
     ]
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Internal.BooleanShaderProperty",
+    "m_ObjectId": "005c7efceb3442649564f886b4fde9a8",
+    "m_Guid": {
+        "m_GuidSerialized": "a2efb95c-e163-4f13-bd16-fc7ad18194ff"
+    },
+    "m_Name": "Accurate G-buffer normals",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Accurate G-buffer normals",
+    "m_DefaultReferenceName": "_Accurate_G_buffer_normals",
+    "m_OverrideReferenceName": "_GBUFFER_NORMALS_OCT_ON",
+    "m_GeneratePropertyBlock": true,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_Precision": 2,
+    "overrideHLSLDeclaration": false,
+    "hlslDeclarationOverride": 0,
+    "m_Hidden": false,
+    "m_Value": false
 }
 
 {
@@ -605,12 +628,12 @@
     "m_CustomSlotLabel": "",
     "m_DismissedVersion": 0,
     "m_KeywordType": 1,
-    "m_KeywordDefinition": 0,
+    "m_KeywordDefinition": 1,
     "m_KeywordScope": 0,
-    "m_KeywordStages": 63,
+    "m_KeywordStages": 2,
     "m_Entries": [
         {
-            "id": 2,
+            "id": 3,
             "displayName": "Hashed Random",
             "referenceName": "HASHED_RANDOM"
         },
@@ -858,7 +881,7 @@
     "m_UseCustomSlotLabel": false,
     "m_CustomSlotLabel": "",
     "m_DismissedVersion": 0,
-    "m_Precision": 0,
+    "m_Precision": 1,
     "overrideHLSLDeclaration": false,
     "hlslDeclarationOverride": 0,
     "m_Hidden": false,
@@ -885,7 +908,7 @@
             "m_Id": "f988b41e9237496c8bcfdcf5283b5cbf"
         },
         {
-            "m_Id": "60d49e824e904387bb9a00f1d9fba056"
+            "m_Id": "005c7efceb3442649564f886b4fde9a8"
         },
         {
             "m_Id": "1ea878323bfa4a8c84693464da12f273"
@@ -1168,7 +1191,7 @@
     "m_UseCustomSlotLabel": false,
     "m_CustomSlotLabel": "",
     "m_DismissedVersion": 0,
-    "m_Precision": 0,
+    "m_Precision": 2,
     "overrideHLSLDeclaration": false,
     "hlslDeclarationOverride": 0,
     "m_Hidden": false,
@@ -1235,31 +1258,6 @@
         "z": 0.0
     },
     "m_Labels": []
-}
-
-{
-    "m_SGVersion": 1,
-    "m_Type": "UnityEditor.ShaderGraph.ShaderKeyword",
-    "m_ObjectId": "60d49e824e904387bb9a00f1d9fba056",
-    "m_Guid": {
-        "m_GuidSerialized": "ea0ef239-4bd6-46d8-b498-a930f6fdad18"
-    },
-    "m_Name": "Accurate G-buffer normals",
-    "m_DefaultRefNameVersion": 1,
-    "m_RefNameGeneratedByDisplayName": "Accurate G-buffer normals",
-    "m_DefaultReferenceName": "_ACCURATE_G_BUFFER_NORMALS",
-    "m_OverrideReferenceName": "_GBUFFER_NORMALS_OCT",
-    "m_GeneratePropertyBlock": true,
-    "m_UseCustomSlotLabel": false,
-    "m_CustomSlotLabel": "",
-    "m_DismissedVersion": 0,
-    "m_KeywordType": 0,
-    "m_KeywordDefinition": 0,
-    "m_KeywordScope": 0,
-    "m_KeywordStages": 2,
-    "m_Entries": [],
-    "m_Value": 0,
-    "m_IsEditable": true
 }
 
 {
@@ -1384,7 +1382,7 @@
         "width",
         "height"
     ],
-    "m_Precision": 0,
+    "m_Precision": 1,
     "m_PreviewExpanded": true,
     "m_DismissedVersion": 0,
     "m_PreviewMode": 0,
@@ -1917,7 +1915,7 @@
     "m_UseCustomSlotLabel": false,
     "m_CustomSlotLabel": "",
     "m_DismissedVersion": 0,
-    "m_Precision": 0,
+    "m_Precision": 2,
     "overrideHLSLDeclaration": false,
     "hlslDeclarationOverride": 0,
     "m_Hidden": false,
@@ -2126,7 +2124,7 @@
         "code",
         "HLSL"
     ],
-    "m_Precision": 0,
+    "m_Precision": 3,
     "m_PreviewExpanded": false,
     "m_DismissedVersion": 0,
     "m_PreviewMode": 0,
@@ -2327,7 +2325,7 @@
         }
     ],
     "synonyms": [],
-    "m_Precision": 0,
+    "m_Precision": 1,
     "m_PreviewExpanded": false,
     "m_DismissedVersion": 0,
     "m_PreviewMode": 0,
@@ -2434,7 +2432,7 @@
     "m_UseCustomSlotLabel": false,
     "m_CustomSlotLabel": "",
     "m_DismissedVersion": 0,
-    "m_Precision": 0,
+    "m_Precision": 1,
     "overrideHLSLDeclaration": false,
     "hlslDeclarationOverride": 0,
     "m_Hidden": false,
@@ -2464,7 +2462,7 @@
     "m_UseCustomSlotLabel": false,
     "m_CustomSlotLabel": "",
     "m_DismissedVersion": 0,
-    "m_Precision": 0,
+    "m_Precision": 1,
     "overrideHLSLDeclaration": false,
     "hlslDeclarationOverride": 0,
     "m_Hidden": false,
@@ -2556,7 +2554,7 @@
     "synonyms": [
         "eye direction"
     ],
-    "m_Precision": 0,
+    "m_Precision": 2,
     "m_PreviewExpanded": false,
     "m_DismissedVersion": 0,
     "m_PreviewMode": 2,
@@ -2790,10 +2788,15 @@
     "m_CustomSlotLabel": "",
     "m_DismissedVersion": 0,
     "m_KeywordType": 1,
-    "m_KeywordDefinition": 0,
+    "m_KeywordDefinition": 1,
     "m_KeywordScope": 0,
     "m_KeywordStages": 2,
     "m_Entries": [
+        {
+            "id": 5,
+            "displayName": "Very Low",
+            "referenceName": "VERY_LOW"
+        },
         {
             "id": 1,
             "displayName": "Low",
@@ -2810,7 +2813,7 @@
             "referenceName": "HIGH"
         }
     ],
-    "m_Value": 0,
+    "m_Value": 1,
     "m_IsEditable": true
 }
 
@@ -2830,7 +2833,7 @@
     "m_UseCustomSlotLabel": false,
     "m_CustomSlotLabel": "",
     "m_DismissedVersion": 0,
-    "m_Precision": 0,
+    "m_Precision": 2,
     "overrideHLSLDeclaration": false,
     "hlslDeclarationOverride": 0,
     "m_Hidden": false,
@@ -2908,15 +2911,15 @@
     "m_Type": "UnityEditor.ShaderGraph.StickyNoteData",
     "m_ObjectId": "fe8b4191e0ed484d8158fde2f7c29c5d",
     "m_Title": "Orthographic?",
-    "m_Content": "Orthographic camera will not be supported because URP will always use Forward rendering path for it.",
+    "m_Content": "Orthographic camera may be supported in the future.\n\nSince the effect now can run on Forward path, it is possible to support orthographic projection after some modifications.\n\nNote:\nThere is no guarantee that orthographic support will be added because some of the optimizations (in this shader) are based on perspective.",
     "m_TextSize": 1,
     "m_Theme": 0,
     "m_Position": {
         "serializedVersion": "2",
-        "x": -1932.0,
-        "y": -88.0,
-        "width": 530.6666259765625,
-        "height": 147.3333282470703
+        "x": -2033.3333740234375,
+        "y": -190.6666717529297,
+        "width": 530.666748046875,
+        "height": 421.1882019042969
     },
     "m_Group": {
         "m_Id": "9cdc160177c1407589d9ccd83ed34b24"

@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
@@ -41,6 +42,35 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     [Range(0.1f, 0.9f)]
     public float denoiserIntensity = 0.5f;
 
+    // Allow changing settings at runtime.
+    public Accumulation AccumulationMode
+    {
+        get { return accumulation; }
+        set
+        {
+            if (accumulation != value)
+            { m_AccumulationPass.sample = 0; accumulation = value; } // Reaccumulate when changing the mode to ensure correct sample weights in offline mode.
+        }
+    }
+
+    public bool AccurateThicknessMode
+    {
+        get { return accurateThickness; }
+        set { accurateThickness = value; }
+    }
+
+    public bool ProgressBar
+    {
+        get { return progressBar; }
+        set { progressBar = value; }
+    }
+
+    public float DenoiserIntensity
+    {
+        get { return denoiserIntensity; }
+        set { denoiserIntensity = Math.Clamp(value, 0.1f, 0.9f); }
+    }
+
     private const string m_PathTracingShaderName = "Universal Render Pipeline/Screen Space Path Tracing";
     // This shader is also used by denoising.
     private const string m_AccumulationShaderName = "Hidden/AccumulateFrame";
@@ -81,14 +111,12 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
         if (m_AccumulationPass == null)
         {
-            m_AccumulationPass = new AccumulationPass(m_AccumulationMaterial, accumulation);
+            m_AccumulationPass = new AccumulationPass(m_AccumulationMaterial, accumulation, progressBar);
             if (accumulation != Accumulation.PerObject)
                 m_AccumulationPass.renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
             else
                 m_AccumulationPass.renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing; // requires current frame Motion Vectors
         }
-        m_AccumulationPass.m_Accumulation = accumulation;
-        m_AccumulationPass.m_ProgressBar = progressBar;
 
         if (m_BackfaceDepthPass == null)
         {
@@ -97,52 +125,59 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         }
         m_BackfaceDepthPass.m_AccurateThickness = accurateThickness;
 
-        if (accurateThickness)
-            m_PathTracingMaterial.SetFloat("_BackDepthEnabled", 1.0f);
-        else
-            m_PathTracingMaterial.SetFloat("_BackDepthEnabled", 0.0f);
-
-        if (accumulation == Accumulation.PerObject)
-            m_AccumulationMaterial.SetFloat("_DenoiserIntensity", denoiserIntensity);
     }
-
 
     protected override void Dispose(bool disposing)
     {
         if (m_AccumulationPass != null)
             m_AccumulationPass.Dispose();
         if (m_BackfaceDepthPass != null)
+        {
+            // Turn off accurate thickness since the render pass is disabled.
+            m_PathTracingMaterial.SetFloat("_BackDepthEnabled", 0.0f);
             m_BackfaceDepthPass.Dispose();
+        }
     }
-
 
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
+        // Update accumulation mode each frame since we support runtime changing of these properties.
+        m_AccumulationPass.m_Accumulation = accumulation;
+
+#if UNITY_EDITOR
+        // Motion Vectors of URP SceneView don't get updated each frame when not entering play mode. (Might be fixed when supporting scene view anti-aliasing)
+        // Change the method to multi-frame accumulation (offline mode) if SceneView is not in play mode.
+        bool isPlayMode = UnityEditor.EditorApplication.isPlaying;
+        if (renderingData.cameraData.camera.cameraType == CameraType.SceneView && !isPlayMode && accumulation == Accumulation.PerObject)
+            m_AccumulationPass.m_Accumulation = Accumulation.Camera;
+#endif
+
         // No need to accumulate when rendering reflection probes, this will also break game view accumulation.
         bool shouldAccumulate = (accumulation == Accumulation.Camera) ? (renderingData.cameraData.camera.cameraType != CameraType.Reflection) : (renderingData.cameraData.camera.cameraType != CameraType.Reflection && renderingData.cameraData.camera.cameraType != CameraType.Preview);
         if (shouldAccumulate)
         {
-#if UNITY_EDITOR
-            // Motion Vectors of URP SceneView don't get updated each frame when not entering play mode. (Might be fixed when supporting scene view anti-aliasing)
-            // Change the method to multi-frame accumulation if SceneView is not in play mode.
-            bool isPlayMode = UnityEditor.EditorApplication.isPlaying;
-            if (renderingData.cameraData.camera.cameraType == CameraType.SceneView && !isPlayMode && accumulation == Accumulation.PerObject)
-                m_AccumulationPass.m_Accumulation = Accumulation.Camera;
-            else if (renderingData.cameraData.camera.cameraType != CameraType.SceneView && !isPlayMode && accumulation == Accumulation.PerObject)
-                m_AccumulationPass.m_Accumulation = Accumulation.PerObject;
-#endif
+            // Update progress bar toggle each frame since we support runtime changing of these properties.
+            m_AccumulationPass.m_ProgressBar = progressBar;
             renderer.EnqueuePass(m_AccumulationPass);
         }
 
         if (accurateThickness)
         {
             renderer.EnqueuePass(m_BackfaceDepthPass);
+            m_PathTracingMaterial.SetFloat("_BackDepthEnabled", 1.0f);
         }
+        else
+        {
+            m_PathTracingMaterial.SetFloat("_BackDepthEnabled", 0.0f);
+        }
+
+        if (accumulation == Accumulation.PerObject)
+            m_AccumulationMaterial.SetFloat("_DenoiserIntensity", denoiserIntensity);
     }
 
     public class AccumulationPass : ScriptableRenderPass
     {
-        private int sample = 0;
+        public int sample = 0;
 
         private Material m_AccumulationMaterial;
         private RTHandle m_AccumulateColorHandle;
@@ -159,10 +194,11 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         private NativeArray<VisibleLight> prevLightsList;
         private NativeArray<VisibleReflectionProbe> prevProbesList;
 
-        public AccumulationPass(Material accuMaterial, Accumulation accumulation)
+        public AccumulationPass(Material accuMaterial, Accumulation accumulation, bool progressBar)
         {
             m_AccumulationMaterial = accuMaterial;
             m_Accumulation = accumulation;
+            m_ProgressBar = progressBar;
         }
 
         public void Dispose()
@@ -356,7 +392,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             }
 
         }
-        
+
         public override void FrameCleanup(CommandBuffer cmd)
         {
             if (m_AccurateThickness)

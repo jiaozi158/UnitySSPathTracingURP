@@ -8,8 +8,6 @@ Shader "Hidden/AccumulateFrame"
 		[HideInInspector] _DenoiserIntensity("Denoiser Intensity", Float) = 0.5
 	}
 
-	// TODO: Reject or reproject history samples according to per object motion vectors?
-
 	SubShader
 	{
 		// No culling or depth
@@ -30,13 +28,10 @@ Shader "Hidden/AccumulateFrame"
 			TEXTURE2D(_MainTex);
 			SAMPLER(my_point_clamp_sampler);
 
-			// Camera or Per Object motion vectors.
-			TEXTURE2D(_MotionVectorTexture);
-
 			CBUFFER_START(UnityPerMaterial)
-			float _Sample;
-			float _MaxSample;
-			float _DenoiserIntensity;
+			half _Sample;
+			half _MaxSample;
+			half _DenoiserIntensity;
 			float4 _MainTex_TexelSize;
 			CBUFFER_END
 
@@ -62,16 +57,11 @@ Shader "Hidden/AccumulateFrame"
 
 			half4 frag(Varyings input) : SV_Target
 			{
-				// TODO: Generate a history texture to store "_Sample" for each pixel, so that the accumulation will be usable for real-time rendering.
-
-				// Will be per object motion in future URP.
-				float2 prevUV = input.uv + SAMPLE_TEXTURE2D_LOD(_MotionVectorTexture, my_point_clamp_sampler, input.uv, 0).xy;
-
 				half3 color = SAMPLE_TEXTURE2D_LOD(_MainTex, my_point_clamp_sampler, input.uv, 0).rgb;
 
 				// When object or camera moves, we should re-accumulate the pixel.
 				bool reAccumulate = (_Sample == 0.0) ? true : false;
-				//bool reAccumulate = (_Sample == 0.0) || (input.uv.x != prevUV.x) || (input.uv.y != prevUV.y) ? true : false;
+
 				if (reAccumulate)
 					return half4(color, 1.0);
 				else
@@ -98,9 +88,9 @@ Shader "Hidden/AccumulateFrame"
 			SAMPLER(my_point_clamp_sampler);
 
 			CBUFFER_START(UnityPerMaterial)
-			float _Sample;
-			float _MaxSample;
-			float _DenoiserIntensity;
+			half _Sample;
+			half _MaxSample;
+			half _DenoiserIntensity;
 			float4 _MainTex_TexelSize;
 			CBUFFER_END
 
@@ -117,7 +107,7 @@ Shader "Hidden/AccumulateFrame"
 			};
 
 			// From HDRP's "./Runtime/RenderPipeline/Accumulation/Shaders/Accumulation.compute"
-			void AddConvergenceCue(float2 screenUV, float currentSample, inout half3 color)
+			void AddConvergenceCue(float2 screenUV, half currentSample, inout half3 color)
 			{
 				// If we reached 100%, do not display the bar anymore
 				if (currentSample >= _MaxSample)
@@ -179,9 +169,9 @@ Shader "Hidden/AccumulateFrame"
 			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 
 			CBUFFER_START(UnityPerMaterial)
-			float _Sample;
-			float _MaxSample;
-			float _DenoiserIntensity;
+			half _Sample;
+			half _MaxSample;
+			half _DenoiserIntensity;
 			float4 _MainTex_TexelSize;
 			CBUFFER_END
 
@@ -247,7 +237,7 @@ Shader "Hidden/AccumulateFrame"
 					// Performance cost here can be reduced by removing less important operations.
 
 					// Color Variance
-					half3 colorCenter = SampleColorPoint(input.uv, float2(0, 0)).xyz;  // Point == Linear as uv == input pixel center.
+					half3 colorCenter = SampleColorPoint(input.uv, float2(0.0, 0.0)).xyz;  // Point == Linear as uv == input pixel center.
 
 					half3 boxMax = colorCenter;
 					half3 boxMin = colorCenter;

@@ -14,6 +14,10 @@ Global Setup
 
  ![AddForwardGBufferFeature](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/OpenGL/ForwardGBufferFeature.jpg)
 
+- Make sure there is a URP renderer that uses Deferred path. This tells Unity to **compile shader variants** for GBuffer rendering.
+
+ ![AddDeferredURPRenderer](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/OpenGL/AddDeferredRenderer.png)
+
 OpenGL Platforms Extra Setup
 -------------
 

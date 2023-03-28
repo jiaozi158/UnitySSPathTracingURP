@@ -79,6 +79,7 @@ MonoBehaviour:
   accurateThickness: 1
   accumulation: 1
   progressBar: 1
+  denoiserIntensity: 0.5
 --- !u!114 &7248218767805662722
 MonoBehaviour:
   m_ObjectHideFlags: 0
