@@ -112,10 +112,10 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         if (m_AccumulationPass == null)
         {
             m_AccumulationPass = new AccumulationPass(m_AccumulationMaterial, accumulation, progressBar);
-            if (accumulation != Accumulation.PerObject)
-                m_AccumulationPass.renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
-            else
-                m_AccumulationPass.renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing; // requires current frame Motion Vectors
+            // URP Upscaling is done after "AfterRenderingPostProcessing".
+            // Offline: avoid PP-effects (panini projection, ...) distorting the progress bar.
+            // Real-time: requires current frame Motion Vectors.
+            m_AccumulationPass.renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing;
         }
 
         if (m_BackfaceDepthPass == null)

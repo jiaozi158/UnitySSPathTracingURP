@@ -64,6 +64,8 @@ Shader "Hidden/AccumulateFrame"
 
 				if (reAccumulate)
 					return half4(color, 1.0);
+				else if (_Sample >= _MaxSample) // Do not accumulate when reaching maximum samples allowed.
+					return half4(color, 0.0);
 				else
 					return half4(color, (1.0 / (_Sample + 1.0)));
 			}
