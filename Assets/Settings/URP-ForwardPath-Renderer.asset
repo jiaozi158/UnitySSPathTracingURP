@@ -77,6 +77,7 @@ MonoBehaviour:
   m_PathTracingMaterial: {fileID: 2100000, guid: a67291bbecb6c2649ba10a01f0af3ccc,
     type: 2}
   accurateThickness: 1
+  refraction: 0
   accumulation: 1
   progressBar: 1
   denoiserIntensity: 0.5

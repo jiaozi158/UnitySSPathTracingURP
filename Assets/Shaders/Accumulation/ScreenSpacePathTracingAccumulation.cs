@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.Rendering.RendererUtils;
-using Unity.Collections;
+using UnityEngine.Experimental.Rendering;
 
 [DisallowMultipleRendererFeature("Screen Space Path Tracing Accumulation")]
 [Tooltip("Add this Renderer Feature to accumulate path tracing results.")]
@@ -24,6 +26,21 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         PerObject = 2
     };
 
+    public enum AccurateThickness
+    {
+        [InspectorName("Disable")]
+        [Tooltip("Do not render back-face data.")]
+        None = 0,
+
+        [InspectorName("Depth")]
+        [Tooltip("Render back-face depth.")]
+        DepthOnly = 1,
+
+        [InspectorName("Depth + Normals")]
+        [Tooltip("Render back-face depth and normals.")]
+        DepthNormals = 2
+    }
+
     [Tooltip("The material of accumulation shader.")]
     public Material m_AccumulationMaterial;
     [Tooltip("The material of path tracing shader.")]
@@ -31,7 +48,11 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
     [Header("Path Tracing Extensions")]
     [Tooltip("Render the backface depth of scene geometries. This improves the accuracy of screen space path tracing, but may not work well in scenes with lots of single-sided objects.")]
-    public bool accurateThickness = false;
+    public AccurateThickness accurateThickness = AccurateThickness.None;
+
+    [Header("Additional Lighting Models")]
+    [Tooltip("Enable this to support Path Tracing refraction.")]
+    public bool refraction = false;
 
     [Header("Accumulation")]
     [Tooltip("The accumulation mode. Real-time mode will only execute in play mode.")]
@@ -53,10 +74,24 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         }
     }
 
-    public bool AccurateThicknessMode
+    public AccurateThickness AccurateThicknessMode
     {
         get { return accurateThickness; }
-        set { accurateThickness = value; }
+        set
+        {
+            if (accurateThickness != value)
+            { m_AccumulationPass.sample = 0; accurateThickness = value; } // Reaccumulate when changing the thickness mode to ensure correct visuals in offline mode.
+        }
+    }
+
+    public bool SupportRefraction
+    {
+        get { return refraction; }
+        set
+        {
+            if (refraction != value)
+            { m_AccumulationPass.sample = 0; refraction = value; } // Reaccumulate when changing refraction mode to ensure correct visuals in offline mode.
+        }
     }
 
     public bool ProgressBar
@@ -76,6 +111,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     private const string m_AccumulationShaderName = "Hidden/AccumulateFrame";
     private AccumulationPass m_AccumulationPass;
     private BackfaceDepthPass m_BackfaceDepthPass;
+    private TransparentGBufferPass m_TransparentGBufferPass;
 
     public override void Create()
     {
@@ -121,9 +157,15 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         if (m_BackfaceDepthPass == null)
         {
             m_BackfaceDepthPass = new BackfaceDepthPass();
-            m_BackfaceDepthPass.renderPassEvent = RenderPassEvent.AfterRenderingOpaques;
+            m_BackfaceDepthPass.renderPassEvent = RenderPassEvent.AfterRenderingOpaques - 1;
         }
         m_BackfaceDepthPass.m_AccurateThickness = accurateThickness;
+
+        if (m_TransparentGBufferPass == null)
+        {
+            m_TransparentGBufferPass = new TransparentGBufferPass(new string[] { "UniversalGBuffer" });
+            m_TransparentGBufferPass.renderPassEvent = RenderPassEvent.AfterRenderingSkybox + 1;
+        }
 
     }
 
@@ -137,6 +179,8 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             m_PathTracingMaterial.SetFloat("_BackDepthEnabled", 0.0f);
             m_BackfaceDepthPass.Dispose();
         }
+        if (m_TransparentGBufferPass! != null)
+            m_TransparentGBufferPass.Dispose();
     }
 
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
@@ -161,10 +205,13 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             renderer.EnqueuePass(m_AccumulationPass);
         }
 
-        if (accurateThickness)
+        if (accurateThickness != AccurateThickness.None)
         {
             renderer.EnqueuePass(m_BackfaceDepthPass);
-            m_PathTracingMaterial.SetFloat("_BackDepthEnabled", 1.0f);
+            if (accurateThickness == AccurateThickness.DepthOnly)
+                m_PathTracingMaterial.SetFloat("_BackDepthEnabled", 1.0f); // DepthOnly
+            else
+                m_PathTracingMaterial.SetFloat("_BackDepthEnabled", 2.0f); // DepthNormals
         }
         else
         {
@@ -173,6 +220,17 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
         if (accumulation == Accumulation.PerObject)
             m_AccumulationMaterial.SetFloat("_DenoiserIntensity", denoiserIntensity);
+
+        if (refraction)
+        {
+            m_PathTracingMaterial.SetFloat("_SupportRefraction", 1.0f);
+            renderer.EnqueuePass(m_TransparentGBufferPass);
+        }
+        else
+        {
+            m_PathTracingMaterial.SetFloat("_SupportRefraction", 0.0f);
+        }
+            
     }
 
     public class AccumulationPass : ScriptableRenderPass
@@ -360,49 +418,75 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     public class BackfaceDepthPass : ScriptableRenderPass
     {
         private RTHandle m_BackDepthHandle;
-        public bool m_AccurateThickness;
+        private RTHandle m_BackNormalsHandle;
+        public AccurateThickness m_AccurateThickness;
 
         private RenderStateBlock m_DepthRenderStateBlock = new RenderStateBlock(RenderStateMask.Nothing);
 
         public void Dispose()
         {
-            if (m_AccurateThickness)
+            if (m_AccurateThickness != AccurateThickness.None)
                 m_BackDepthHandle?.Release();
+            if (m_AccurateThickness == AccurateThickness.DepthNormals)
+                m_BackNormalsHandle?.Release();
         }
 
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
-            var desc = renderingData.cameraData.cameraTargetDescriptor;
-            if (renderingData.cameraData.cameraTargetDescriptor.depthStencilFormat == UnityEngine.Experimental.Rendering.GraphicsFormat.D32_SFloat_S8_UInt)
-                desc.depthStencilFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.D32_SFloat;
-            else if (renderingData.cameraData.cameraTargetDescriptor.depthStencilFormat == UnityEngine.Experimental.Rendering.GraphicsFormat.D24_UNorm_S8_UInt)
-                desc.depthStencilFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.D24_UNorm;
-            else if (renderingData.cameraData.cameraTargetDescriptor.depthStencilFormat == UnityEngine.Experimental.Rendering.GraphicsFormat.D16_UNorm_S8_UInt)
-                desc.depthStencilFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.D16_UNorm;
+            var depthDesc = renderingData.cameraData.cameraTargetDescriptor;
+            if (renderingData.cameraData.cameraTargetDescriptor.depthStencilFormat == GraphicsFormat.D32_SFloat_S8_UInt)
+                depthDesc.depthStencilFormat = GraphicsFormat.D32_SFloat;
+            else if (renderingData.cameraData.cameraTargetDescriptor.depthStencilFormat == GraphicsFormat.D24_UNorm_S8_UInt)
+                depthDesc.depthStencilFormat = GraphicsFormat.D24_UNorm;
+            else if (renderingData.cameraData.cameraTargetDescriptor.depthStencilFormat == GraphicsFormat.D16_UNorm_S8_UInt)
+                depthDesc.depthStencilFormat = GraphicsFormat.D16_UNorm;
             else
-                desc.depthStencilFormat = renderingData.cameraData.cameraTargetDescriptor.depthStencilFormat;
+                depthDesc.depthStencilFormat = renderingData.cameraData.cameraTargetDescriptor.depthStencilFormat;
 
-            if (m_AccurateThickness)
+            if (m_AccurateThickness == AccurateThickness.DepthOnly)
             {
-                RenderingUtils.ReAllocateIfNeeded(ref m_BackDepthHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_CameraBackDepthTexture");
+                RenderingUtils.ReAllocateIfNeeded(ref m_BackDepthHandle, depthDesc, FilterMode.Point, TextureWrapMode.Clamp, name: "_CameraBackDepthTexture");
                 cmd.SetGlobalTexture("_CameraBackDepthTexture", m_BackDepthHandle);
 
                 ConfigureTarget(m_BackDepthHandle);
-                ConfigureClear(ClearFlag.Depth, Color.black);
+                ConfigureClear(ClearFlag.Depth, Color.clear);
             }
+            else if (m_AccurateThickness == AccurateThickness.DepthNormals)
+            {
+                var normalsDesc = renderingData.cameraData.cameraTargetDescriptor;
+                // normal normal normal packedSmoothness
+                // NormalWS range is -1.0 to 1.0, so we need a signed render texture.
+                normalsDesc.depthStencilFormat = GraphicsFormat.None;
+                if (SystemInfo.IsFormatSupported(GraphicsFormat.R8G8B8A8_SNorm, FormatUsage.Render))
+                    normalsDesc.graphicsFormat = GraphicsFormat.R8G8B8A8_SNorm;
+                else
+                    normalsDesc.graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat;
 
+                RenderingUtils.ReAllocateIfNeeded(ref m_BackDepthHandle, depthDesc, FilterMode.Point, TextureWrapMode.Clamp, name: "_CameraBackDepthTexture");
+                cmd.SetGlobalTexture("_CameraBackDepthTexture", m_BackDepthHandle);
+
+                RenderingUtils.ReAllocateIfNeeded(ref m_BackNormalsHandle, normalsDesc, FilterMode.Point, TextureWrapMode.Clamp, name: "_CameraBackNormalsTexture");
+                cmd.SetGlobalTexture("_CameraBackNormalsTexture", m_BackNormalsHandle);
+
+                ConfigureTarget(m_BackNormalsHandle, m_BackDepthHandle);
+                ConfigureClear(ClearFlag.Color | ClearFlag.Depth, Color.clear);
+            }
         }
 
         public override void FrameCleanup(CommandBuffer cmd)
         {
-            if (m_AccurateThickness)
+            if (m_AccurateThickness != AccurateThickness.None)
                 cmd.ReleaseTemporaryRT(Shader.PropertyToID(m_BackDepthHandle.name));
+            if (m_AccurateThickness == AccurateThickness.DepthNormals)
+                cmd.ReleaseTemporaryRT(Shader.PropertyToID(m_BackNormalsHandle.name));
         }
 
         public override void OnCameraCleanup(CommandBuffer cmd)
         {
-            if (m_AccurateThickness)
+            if (m_AccurateThickness != AccurateThickness.None)
                 m_BackDepthHandle = null;
+            if (m_AccurateThickness == AccurateThickness.DepthNormals)
+                m_BackNormalsHandle = null;
         }
 
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
@@ -410,7 +494,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             CommandBuffer cmd = CommandBufferPool.Get();
 
             // Render backface depth
-            if (m_AccurateThickness)
+            if (m_AccurateThickness == AccurateThickness.DepthOnly)
             {
                 using (new ProfilingScope(cmd, new ProfilingSampler("Path Tracing Backface Depth")))
                 {
@@ -421,7 +505,25 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
                     m_DepthRenderStateBlock.mask |= RenderStateMask.Raster;
                     rendererListDesc.stateBlock = m_DepthRenderStateBlock;
                     rendererListDesc.sortingCriteria = renderingData.cameraData.defaultOpaqueSortFlags;
-                    rendererListDesc.renderQueueRange = new RenderQueueRange(2000, 3000);
+                    rendererListDesc.renderQueueRange = RenderQueueRange.all;
+                    RendererList rendererList = context.CreateRendererList(rendererListDesc);
+
+                    cmd.DrawRendererList(rendererList);
+                }
+            }
+            // Render backface depth + normals
+            else if (m_AccurateThickness == AccurateThickness.DepthNormals)
+            {
+                using (new ProfilingScope(cmd, new ProfilingSampler("Path Tracing Backface Depth Normals")))
+                {
+                    RendererListDesc rendererListDesc = new RendererListDesc(new ShaderTagId("DepthNormals"), renderingData.cullResults, renderingData.cameraData.camera);
+                    m_DepthRenderStateBlock.depthState = new DepthState(true, CompareFunction.LessEqual);
+                    m_DepthRenderStateBlock.mask |= RenderStateMask.Depth;
+                    m_DepthRenderStateBlock.rasterState = new RasterState(CullMode.Front);
+                    m_DepthRenderStateBlock.mask |= RenderStateMask.Raster;
+                    rendererListDesc.stateBlock = m_DepthRenderStateBlock;
+                    rendererListDesc.sortingCriteria = renderingData.cameraData.defaultOpaqueSortFlags;
+                    rendererListDesc.renderQueueRange = RenderQueueRange.all;
                     RendererList rendererList = context.CreateRendererList(rendererListDesc);
 
                     cmd.DrawRendererList(rendererList);
@@ -430,6 +532,170 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             context.ExecuteCommandBuffer(cmd);
             cmd.Clear();
             CommandBufferPool.Release(cmd);
+        }
+    }
+
+    public class TransparentGBufferPass : ScriptableRenderPass
+    {
+        const string m_ProfilerTag = "Path Tracing Transparent GBuffer";
+        private List<ShaderTagId> m_ShaderTagIdList = new List<ShaderTagId>();
+        private FilteringSettings m_filter;
+
+        // Depth Priming.
+        private RenderStateBlock m_RenderStateBlock = new RenderStateBlock(RenderStateMask.Nothing);
+
+        private RenderStateBlock m_DepthRenderStateBlock = new RenderStateBlock(RenderStateMask.Nothing);
+
+        public RTHandle m_TransparentGBuffer0;
+        public RTHandle m_TransparentGBuffer1;
+        public RTHandle m_TransparentGBuffer2;
+        private RTHandle[] m_TransparentGBuffers;
+
+        //public RTHandle m_BackDepthBuffer;
+
+        public TransparentGBufferPass(string[] PassNames)
+        {
+            RenderQueueRange queue = RenderQueueRange.transparent;// new RenderQueueRange(3000, 3000);
+            m_filter = new FilteringSettings(queue);
+            if (PassNames != null && PassNames.Length > 0)
+            {
+                foreach (var passName in PassNames)
+                    m_ShaderTagIdList.Add(new ShaderTagId(passName));
+            }
+        }
+
+        public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
+        {
+            // GBuffer cannot store surface data from transparent objects.
+            SortingCriteria sortingCriteria = renderingData.cameraData.defaultOpaqueSortFlags;
+
+            CommandBuffer cmd = CommandBufferPool.Get();
+            using (new ProfilingScope(cmd, new ProfilingSampler(m_ProfilerTag)))
+            {
+                RendererListDesc rendererListDesc = new RendererListDesc(m_ShaderTagIdList[0], renderingData.cullResults, renderingData.cameraData.camera);
+                rendererListDesc.stateBlock = m_RenderStateBlock;
+                rendererListDesc.sortingCriteria = sortingCriteria;
+                rendererListDesc.renderQueueRange = m_filter.renderQueueRange;
+                RendererList rendererList = context.CreateRendererList(rendererListDesc);
+
+                cmd.DrawRendererList(rendererList);
+            }
+            /*
+            using (new ProfilingScope(cmd, new ProfilingSampler("Path Tracing Back Depth")))
+            {
+                RendererListDesc rendererListDesc = new RendererListDesc(m_ShaderTagIdList[1], renderingData.cullResults, renderingData.cameraData.camera);
+                m_DepthRenderStateBlock.depthState = new DepthState(true, CompareFunction.LessEqual);
+                m_DepthRenderStateBlock.mask |= RenderStateMask.Depth;
+                m_DepthRenderStateBlock.rasterState = new RasterState(CullMode.Front);
+                m_DepthRenderStateBlock.mask |= RenderStateMask.Raster;
+                rendererListDesc.stateBlock = m_DepthRenderStateBlock;
+                rendererListDesc.sortingCriteria = sortingCriteria;
+                rendererListDesc.renderQueueRange = m_filter.renderQueueRange;
+                RendererList rendererList = context.CreateRendererList(rendererListDesc);
+
+                cmd.SetRenderTarget(m_BackDepthBuffer);
+                cmd.ClearRenderTarget(RTClearFlags.Depth, Color.black, 1, 0);
+
+                cmd.DrawRendererList(rendererList);
+            }
+            */
+            context.ExecuteCommandBuffer(cmd);
+            cmd.Clear();
+            CommandBufferPool.Release(cmd);
+        }
+
+        public void Dispose()
+        {
+            m_TransparentGBuffer0?.Release();
+            m_TransparentGBuffer1?.Release();
+            m_TransparentGBuffer2?.Release();
+            //m_BackDepthBuffer?.Release();
+        }
+
+        // From "URP-Package/Runtime/DeferredLights.cs".
+        public GraphicsFormat GetGBufferFormat(int index)
+        {
+            if (index == 0) // sRGB albedo, materialFlags
+                return QualitySettings.activeColorSpace == ColorSpace.Linear ? GraphicsFormat.R8G8B8A8_SRGB : GraphicsFormat.R8G8B8A8_UNorm;
+            else if (index == 1) // sRGB specular, occlusion
+                return GraphicsFormat.R8G8B8A8_UNorm;
+            else if (index == 2) // normal normal normal packedSmoothness
+                // NormalWS range is -1.0 to 1.0, so we need a signed render texture.
+                if (SystemInfo.IsFormatSupported(GraphicsFormat.R8G8B8A8_SNorm, FormatUsage.Render))
+                    return GraphicsFormat.R8G8B8A8_SNorm;
+                else
+                    return GraphicsFormat.R16G16B16A16_SFloat;
+            else
+                return GraphicsFormat.None;
+        }
+
+        public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
+        {
+            RenderTextureDescriptor desc = renderingData.cameraData.cameraTargetDescriptor;
+            desc.depthBufferBits = 0; // Color and depth cannot be combined in RTHandles
+            desc.stencilFormat = GraphicsFormat.None;
+            desc.msaaSamples = 1; // Do not enable MSAA for GBuffers.
+
+            // Albedo.rgb + MaterialFlags.a
+            desc.graphicsFormat = GetGBufferFormat(0);
+            RenderingUtils.ReAllocateIfNeeded(ref m_TransparentGBuffer0, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_TransparentGBuffer0");
+            cmd.SetGlobalTexture("_TransparentGBuffer0", m_TransparentGBuffer0);
+
+            // Specular.rgb + Occlusion.a
+            desc.graphicsFormat = GetGBufferFormat(1);
+            RenderingUtils.ReAllocateIfNeeded(ref m_TransparentGBuffer1, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_TransparentGBuffer1");
+            cmd.SetGlobalTexture("_TransparentGBuffer1", m_TransparentGBuffer1);
+
+            // NormalWS.rgb + Smoothness.a
+            desc.graphicsFormat = GetGBufferFormat(2);
+            RenderingUtils.ReAllocateIfNeeded(ref m_TransparentGBuffer2, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_TransparentGBuffer2");
+            cmd.SetGlobalTexture("_TransparentGBuffer2", m_TransparentGBuffer2);
+
+            m_TransparentGBuffers = new RTHandle[] { m_TransparentGBuffer0, m_TransparentGBuffer1, m_TransparentGBuffer2 };
+
+            //RenderingUtils.ReAllocateIfNeeded(ref m_BackDepthBuffer, renderingData.cameraData.cameraTargetDescriptor, FilterMode.Point, TextureWrapMode.Clamp, name: "_CameraBackDepthTexture");
+            //cmd.SetGlobalTexture("_CameraBackDepthTexture", m_BackDepthBuffer);
+
+            ConfigureTarget(m_TransparentGBuffers, renderingData.cameraData.renderer.cameraDepthTargetHandle);
+
+            // Require Depth Texture in Forward pipeline.
+            ConfigureInput(ScriptableRenderPassInput.Depth);
+
+            // [OpenGL] Reusing the depth buffer seems to cause black glitching artifacts, so clear the existing depth.
+            bool isOpenGL = (SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3) || (SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLCore); // GLES 2 is deprecated.
+            if (isOpenGL)
+                ConfigureClear(ClearFlag.Color | ClearFlag.Depth, Color.clear);
+            else
+                // We have to also clear previous color so that the "background" will remain empty (black) when moving the camera.
+                ConfigureClear(ClearFlag.Color, Color.clear);
+
+            // Reduce GBuffer overdraw using the depth from opaque pass. (excluding OpenGL platforms)
+            if (!isOpenGL && (renderingData.cameraData.renderType == CameraRenderType.Base || renderingData.cameraData.clearDepth))
+            {
+                m_RenderStateBlock.depthState = new DepthState(true, CompareFunction.LessEqual);
+                m_RenderStateBlock.mask |= RenderStateMask.Depth;
+            }
+            else if (m_RenderStateBlock.depthState.compareFunction == CompareFunction.Equal)
+            {
+                m_RenderStateBlock.depthState = new DepthState(true, CompareFunction.LessEqual);
+                m_RenderStateBlock.mask |= RenderStateMask.Depth;
+            }
+
+            m_RenderStateBlock.blendState = new BlendState
+            {
+                blendState0 = new RenderTargetBlendState
+                {
+
+                    destinationColorBlendMode = BlendMode.Zero,
+                    sourceColorBlendMode = BlendMode.One,
+                    destinationAlphaBlendMode = BlendMode.Zero,
+                    sourceAlphaBlendMode = BlendMode.One,
+                    colorBlendOperation = BlendOp.Add,
+                    alphaBlendOperation = BlendOp.Add,
+                    writeMask = ColorWriteMask.All
+                }
+            };
+            m_RenderStateBlock.mask |= RenderStateMask.Blend;
         }
     }
 }

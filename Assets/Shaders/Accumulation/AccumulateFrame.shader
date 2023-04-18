@@ -182,6 +182,9 @@ Shader "Hidden/AccumulateFrame"
 			TEXTURE2D(_CameraDepthTexture);
 			SAMPLER(sampler_CameraDepthTexture);
 
+			TEXTURE2D(_CameraDepthAttachment);
+			SAMPLER(sampler_CameraDepthAttachment);
+
 			TEXTURE2D(_PathTracingHistoryTexture);
 			SAMPLER(my_point_clamp_sampler);
 
@@ -220,8 +223,8 @@ Shader "Hidden/AccumulateFrame"
 				half2 motion = SAMPLE_TEXTURE2D_X_LOD(_MotionVectorTexture, sampler_LinearClamp, input.uv, 0).xy;
 				float2 prevUV = input.uv - motion;
 
-				float deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_CameraDepthTexture, UnityStereoTransformScreenSpaceTex(input.uv), 0).r;
-				float prevDeviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_CameraDepthTexture, UnityStereoTransformScreenSpaceTex(prevUV), 0).r;
+				float deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthAttachment, sampler_CameraDepthAttachment, UnityStereoTransformScreenSpaceTex(input.uv), 0).r;
+				float prevDeviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthAttachment, sampler_CameraDepthAttachment, UnityStereoTransformScreenSpaceTex(prevUV), 0).r;
 				bool isSky;
 				#if (UNITY_REVERSED_Z == 1)
 					isSky = deviceDepth == 0.0 || prevDeviceDepth == 0.0 ? true : false;

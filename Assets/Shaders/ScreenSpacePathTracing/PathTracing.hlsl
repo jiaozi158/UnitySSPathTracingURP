@@ -69,6 +69,15 @@ TEXTURE2D_X_HALF(_GBuffer1); // specular.rgb + oclusion.a
 TEXTURE2D_X_HALF(_GBuffer2); // normalWS.rgb + smoothness.a
 // _GBuffer3                 // indirectLighting.rgb (B10G11R11 / R16G16B16A16)
 
+// GBuffers for transparent objects (stores the first layer only)
+TEXTURE2D_X_HALF(_TransparentGBuffer0); // color.rgb + materialFlags.a
+TEXTURE2D_X_HALF(_TransparentGBuffer1); // surfaceData.rgb + surfaceType.a
+TEXTURE2D_X_HALF(_TransparentGBuffer2); // normalWS.rgb + smoothness.a
+
+TEXTURE2D_X(_CameraDepthAttachment); // CameraTransparentDepthTexture (stores the first layer only)
+
+SAMPLER(sampler_CameraDepthAttachment);
+
 // GBuffer 3 is the current render target, which means inaccessible.
 // It's also the Emission GBuffer when there's no lighting in scene.
 TEXTURE2D_X(_BlitTexture);   // indirectLighting.rgb (B10G11R11 / R16G16B16A16)
@@ -91,6 +100,8 @@ FRAMEBUFFER_INPUT_HALF(GBUFFER2);
 //===================================================================================================================================
 TEXTURE2D(_CameraBackDepthTexture);
 SAMPLER(sampler_CameraBackDepthTexture);
+
+TEXTURE2D(_CameraBackNormalsTexture);
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/BRDF.hlsl"
 
@@ -148,7 +159,7 @@ float GenerateRandomValue(float2 screenUV)
 #endif
 }
 
-void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 specular, inout half3 normal, inout half3 emission, inout half smoothness)
+void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 specular, inout half3 normal, inout half3 emission, inout half smoothness, inout half ior, inout half insideObject, bool isRefraction = false)
 {
 #if defined(_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
     screenUV = (screenUV * 2.0 - 1.0) * _ScreenSize.zw;
@@ -177,6 +188,7 @@ void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 
     albedo = isForward ? half3(0.0, 0.0, 0.0) : gbuffer0.rgb;
     
     uint materialFlags = UnpackMaterialFlags(gbuffer0.a);
+    // 0.04 is the "Dieletric Specular" (kDieletricSpec.rgb)
     specular = materialFlags == kMaterialFlagSpecularSetup ? gbuffer1.rgb : lerp(kDieletricSpec.rgb, max(albedo, kDieletricSpec.rgb), gbuffer1.r); // Specular & Metallic setup conversion
     specular = isForward ? half3(0.0, 0.0, 0.0) : specular;
 
@@ -191,6 +203,51 @@ void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 
 
     emission = gbuffer3.rgb;
     smoothness = gbuffer2.a;
+
+    half4 transparentGBuffer1 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer1, my_point_clamp_sampler, screenUV, 0);
+    uint surfaceType = UnpackMaterialFlags(transparentGBuffer1.a);
+    half3 backNormal = SAMPLE_TEXTURE2D_X_LOD(_CameraBackNormalsTexture, my_point_clamp_sampler, screenUV, 0).rgb;
+    if (surfaceType == 2 && isRefraction && _SupportRefraction == 1.0)
+    {
+        if (insideObject == 0.0 || insideObject == 1.0)
+        {
+            half4 transparentGBuffer0 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer0, my_point_clamp_sampler, screenUV, 0);
+            half4 transparentGBuffer2 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer2, my_point_clamp_sampler, screenUV, 0);
+            albedo = transparentGBuffer0.rgb;
+            specular = kDieletricSpec.rgb;
+            ior = transparentGBuffer1.r * 2.0 + 1.0;
+            normal = transparentGBuffer2.rgb;
+
+            if (_GBUFFER_NORMALS_OCT_ON == true)
+            {
+                half2 remappedOctNormalWS = half2(Unpack888ToFloat2(normal));          // values between [ 0, +1]
+                half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);          // values between [-1, +1]
+                normal = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
+            }
+            
+            if (insideObject == 1.0)
+            {
+                if (backNormal.x == 0.0 && backNormal.y == 0.0 && backNormal.z == 0.0)
+                    normal = normal;
+                else
+                    normal = -backNormal;
+            }
+            smoothness = transparentGBuffer2.a;
+            emission = half3(0.0, 0.0, 0.0);
+        }
+
+        // Enter and exit object
+        if (insideObject == 2.0)
+            insideObject = 0.0;
+        else if (insideObject == 1.0)
+            insideObject = 2.0;
+        else if (insideObject == 0.0)
+            insideObject = 1.0;
+    }
+    else
+    {
+        ior = -1.0; // No refraction
+    }
 }
 //===================================================================================================================================
 
@@ -216,6 +273,8 @@ struct RayHit
     half3  normal;
     half3  emission;
     half   smoothness;
+    half   ior;
+    half   insideObject; // inside refraction object
 };
 
 // position : the intersection between Ray and Scene.
@@ -232,6 +291,8 @@ RayHit InitializeRayHit()
     rayHit.normal = half3(0.0, 0.0, 0.0);
     rayHit.emission = half3(0.0, 0.0, 0.0);
     rayHit.smoothness = 0.0;
+    rayHit.ior = -1.0;
+    rayHit.insideObject = 0.0;
     return rayHit;
 }
 
@@ -265,21 +326,21 @@ half3 ImportanceSampleGGX(float2 random, half3 normal, half smoothness)
 }
 
 // If no intersection, "rayHit.distance" will remain "REAL_EPS".
-RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 screenUV = float2(0.5, 0.5), float3 positionWS = float3(1.0, 1.0, 1.0), float3 cameraPositionWS = float3(0.0, 0.0, 0.0))
+RayHit RayMarching(Ray ray, half insideObject, half dither, bool isFirstBounce = false, float2 screenUV = float2(0.5, 0.5), float3 positionWS = float3(1.0, 1.0, 1.0), float3 cameraPositionWS = float3(0.0, 0.0, 0.0))
 {
     RayHit rayHit;
 
     half stepSize = STEP_SIZE;
     half marchingThickness = MARCHING_THICKNESS;
     // (Safety Distance) Push the ray's marching origin to a position that is near the intersection when in first bounce.
-    half accumulatedStep = isFirstBounce ? (length(positionWS - cameraPositionWS) - STEP_SIZE) : 0.0;
+    half accumulatedStep = isFirstBounce ? (distance(cameraPositionWS, positionWS) - STEP_SIZE) : 0.0;
 
     float lastDepthDiff = 0.0;
     //float2 lastRayPositionNDC = float2(0.0, 0.0);
     float3 lastRayPositionWS = float3(0.0, 0.0, 0.0);
     bool startBinarySearch = false;
     UNITY_LOOP
-    for (int i = 1; i <= MAX_STEP; i++)
+    for (uint i = 1; i <= MAX_STEP; i++)
     {
         accumulatedStep += isFirstBounce ? stepSize : (stepSize + stepSize * dither);
 
@@ -287,13 +348,20 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
 
         float3 rayPositionNDC = ComputeNormalizedDeviceCoordinatesWithZ(rayPositionWS, GetWorldToHClipMatrix());
 
-        float deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_CameraDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
-        float sceneDepth = -LinearEyeDepth(deviceDepth, _ZBufferParams); // z buffer depth
-
 #if (UNITY_REVERSED_Z == 0) // OpenGL platforms
         rayPositionNDC.z = rayPositionNDC.z * 0.5 + 0.5; // -1..1 to 0..1
 #endif
 
+        float deviceDepth; // z buffer depth
+
+        if (insideObject == 1.0 &&_SupportRefraction == 1.0)
+            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, sampler_CameraBackDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r; // Transparent Depth Layer 2
+        else if (insideObject == 2.0 && _SupportRefraction == 1.0)
+            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_CameraDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r; // Opaque Depth Layer
+        else
+            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthAttachment, sampler_CameraDepthAttachment, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r; // Transparent Depth Layer 1
+
+        float sceneDepth = -LinearEyeDepth(deviceDepth, _ZBufferParams);
         float hitDepth = LinearEyeDepth(rayPositionNDC.z, _ZBufferParams); // Non-GL (DirectX): rayPositionNDC.z is (near to far) 1..0
 
         float depthDiff = hitDepth - sceneDepth;
@@ -302,9 +370,12 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
         float sceneBackDepth = 0.0;
         float backDepthDiff = 0.0;
         UNITY_BRANCH
-        if (_BackDepthEnabled == 1.0)
+        if (_BackDepthEnabled != 0.0)
         {
-            deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, sampler_CameraBackDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
+            if (insideObject == 1.0 && _SupportRefraction == 1.0)
+                deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_CameraDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
+            else
+                deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, sampler_CameraBackDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
             sceneBackDepth = -LinearEyeDepth(deviceBackDepth, _ZBufferParams); // z buffer back depth
 
             bool backDepthValid; // Avoid infinite thickness for objects with no thickness (ex. Plane).
@@ -341,7 +412,7 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
         if (!isScreenSpace)
             break;
 
-        bool isSky; // Do not reflect sky, the reflection probe fallback will provide better visual quality.
+        bool isSky; // Do not reflect sky, the reflection probe fallback will provide better visuals.
     #if (UNITY_REVERSED_Z == 1)
         isSky = deviceDepth == 0.0 ? true : false;
     #else
@@ -355,7 +426,7 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
         // 3. sceneDepth < hitDepth + MARCHING_THICKNESS
         // 4. hitDepth >= sceneBackDepth
         UNITY_BRANCH
-        if (_BackDepthEnabled == 1.0)
+        if (_BackDepthEnabled != 0.0)
         {
             bool backDepthValid; // Avoid infinite thickness for objects with no thickness (ex. Plane).
         #if (UNITY_REVERSED_Z == 1)
@@ -401,13 +472,25 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
                 rayHit.position = lerp(lastRayPositionWS, rayHit.position, lastDepthDiff * rcp(lastDepthDiff - depthDiff));
             }
 
-            HitSurfaceDataFromGBuffer(rayPositionNDC.xy, rayHit.albedo, rayHit.specular, rayHit.normal, rayHit.emission, rayHit.smoothness);
-
+            rayHit.insideObject = insideObject;
+            bool isRefraction = false;
+            if ((insideObject == 0.0 || insideObject == 1.0))
+                isRefraction = true;
+            HitSurfaceDataFromGBuffer(rayPositionNDC.xy, rayHit.albedo, rayHit.specular, rayHit.normal, rayHit.emission, rayHit.smoothness, rayHit.ior, rayHit.insideObject, isRefraction);
+            
             // Reverse the normal direction since it's a back face.
             // Reuse the front face GBuffer to save performance.
-            if (isBackHit)
-                rayHit.normal = -rayHit.normal;
+            if (isBackHit && _BackDepthEnabled == 2.0)
+            {
 
+                half3 backNormal = SAMPLE_TEXTURE2D_X_LOD(_CameraBackNormalsTexture, my_point_clamp_sampler, rayPositionNDC.xy, 0).rgb;
+                if (backNormal.x == 0.0 && backNormal.y == 0.0 && backNormal.z == 0.0)
+                    rayHit.normal = -rayHit.normal;
+                else
+                    rayHit.normal = backNormal;
+            }
+            else if (isBackHit)
+                rayHit.normal = -rayHit.normal;
             break;
         }
         // [Optimization] Exponentially increase the stepSize when the ray hasn't passed through the intersection.
@@ -428,14 +511,15 @@ RayHit RayMarching(Ray ray, half dither, bool isFirstBounce = false, float2 scre
     return rayHit;
 }
 
-half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, half3 viewDirectionWS, float3 positionWS, bool isBackground = false)
+half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirectionWS, float3 positionWS, bool isBackground = false)
 {
     // If the ray intersects the scene.
     if (rayHit.distance > REAL_EPS)
     {
-        // Calculate chances of diffuse and specular reflection.
-        half specChance = ReflectivitySpecular(rayHit.specular); //energy(rayHit.specular);
-        half diffChance = 1.0 - specChance; //energy(rayHit.albedo);
+        // Calculate chances of refraction, diffuse and specular reflection.
+        half specChance = ReflectivitySpecular(rayHit.specular);
+        half refractChance = rayHit.ior == -1.0 ? 0.0 : ReflectivitySpecular(rayHit.albedo) - specChance;
+        half diffChance = 1.0 - specChance - refractChance;
 
         // Roulette-select the ray's path.
         half roulette = random.z;
@@ -443,6 +527,7 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
         // Fresnel effect
         half fresnel = F_Schlick(0.04, max(rayHit.smoothness, 0.04), saturate(dot(rayHit.normal, -ray.direction)));
 
+        UNITY_BRANCH
         if (specChance > 0 && roulette < specChance + fresnel)
         {
             // Specular reflection BRDF
@@ -450,7 +535,18 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
             ray.position = rayHit.position + ray.direction * RAY_BIAS;
             // BRDF * cosTheta / PDF
             // [specular / dot(N, L)] * dot(N, L) / 1.0
+            rayHit.specular = refractChance == 0.0 ? rayHit.specular : rayHit.specular * rayHit.albedo;
             ray.energy *= rcp(specChance) * rayHit.specular;
+        }
+        else if (refractChance > 0 && roulette < refractChance + fresnel)
+        {
+            // Refraction
+            rayHit.ior = rayHit.insideObject == 1.0 ? (1.0 / rayHit.ior) : rayHit.ior; // (air / material) : (material / air)
+            ray.direction = refract(ray.direction, ImportanceSampleGGX(random.xy, rayHit.normal, rayHit.smoothness), rayHit.ior);
+            ray.position = rayHit.position + ray.direction * RAY_BIAS;
+            // Absorption
+            if (rayHit.insideObject == 2.0) // Exit refractive object
+                ray.energy *= rcp(refractChance) * exp(rayHit.albedo * rayHit.distance);
         }
         else if (diffChance > 0 && roulette < diffChance + fresnel)
         {
@@ -528,16 +624,33 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, half dither, float3 random, ha
 }
 
 // Shader Graph does not support passing custom structure.
-void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 screenUV, float3 positionWS, bool isBackground, out half3 color)
+void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 screenUV, out half3 color)
 {
+    float depth;
+    if (_SupportRefraction == 1.0)
+        depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthAttachment, sampler_CameraDepthAttachment, UnityStereoTransformScreenSpaceTex(screenUV), 0).r;
+    else
+        depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_CameraDepthTexture, UnityStereoTransformScreenSpaceTex(screenUV), 0).r;
+#if !UNITY_REVERSED_Z
+    depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, depth);
+#endif
+    float3 positionWS = ComputeWorldSpacePosition(screenUV, depth, UNITY_MATRIX_I_VP);
+
+    bool isBackground;
+#if (UNITY_REVERSED_Z == 1)
+    isBackground = depth == 0.0 ? true : false;
+#else
+    isBackground = depth == 1.0 ? true : false; // OpenGL Platforms.
+#endif
+
     half dither = 0.0;
 #if defined(_DITHERING)
-#if defined(_RAY_MARCHING_VERY_LOW)
-    // Double the dither intensity if ray marching quality is set to very low (large STEP_SIZE).
-    dither = (GenerateRandomValue(screenUV) * 0.4 - 0.2) * _Dither_Intensity; // Range from -0.2 to 0.2 (assuming intensity is 1)
-#else
-    dither = (GenerateRandomValue(screenUV) * 0.2 - 0.1) * _Dither_Intensity; // Range from -0.1 to 0.1 (assuming intensity is 1)
-#endif
+    #if defined(_RAY_MARCHING_VERY_LOW)
+        // Double the dither intensity if ray marching quality is set to very low (large STEP_SIZE).
+        dither = (GenerateRandomValue(screenUV) * 0.4 - 0.2) * _Dither_Intensity; // Range from -0.2 to 0.2 (assuming intensity is 1)
+    #else
+        dither = (GenerateRandomValue(screenUV) * 0.2 - 0.1) * _Dither_Intensity; // Range from -0.1 to 0.1 (assuming intensity is 1)
+    #endif
 #endif
 
     // Avoid shader warning of using unintialized value.
@@ -564,6 +677,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
     for (int i = 0; i < RAY_COUNT; i++)
 #endif
     {
+        roughnessBias = 0.0;
         Ray ray;
         ray.position = cameraPositionWS;
         ray.direction = -viewDirectionWS; // viewDirectionWS points to the camera.
@@ -574,15 +688,18 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
         // For rays from camera to scene (first bounce), add an initial distance according to the world position reconstructed from depth.
         // This allows ray marching to consider distant objects without increasing the maximum number of steps.
         {
-            rayHit = RayMarching(ray, dither, true, screenUV, positionWS, cameraPositionWS);
+            rayHit.position = cameraPositionWS + length(cameraPositionWS - positionWS) * viewDirectionWS;
+            
+            rayHit.distance = STEP_SIZE;
+            HitSurfaceDataFromGBuffer(screenUV, rayHit.albedo, rayHit.specular, rayHit.normal, rayHit.emission, rayHit.smoothness, rayHit.ior, rayHit.insideObject, true);
 
             random.x = GenerateRandomValue(screenUV);
             random.y = GenerateRandomValue(screenUV);
             random.z = GenerateRandomValue(screenUV);
 
-#if defined(_IGNORE_FORWARD_OBJECTS)
+        #if defined(_IGNORE_FORWARD_OBJECTS)
             isForward = rayHit.smoothness == 0.0 ? true : false;
-#endif
+        #endif
             if (isForward && !isBackground)
             {
                 color = rayHit.emission;
@@ -592,8 +709,16 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
             }
             else
             {
+                // Firefly reduction
+                // From https://twitter.com/YuriyODonnell/status/1199253959086612480
+                // Seems to be no difference, need to dig deeper later.
+                half oldRoughness = (1.0 - rayHit.smoothness) * (1.0 - rayHit.smoothness);
+                half modifiedRoughness = min(1.0, oldRoughness + roughnessBias);
+                rayHit.smoothness = 1.0 - sqrt(modifiedRoughness);
+                roughnessBias += oldRoughness * 0.75;
+
                 // energy * emission * SPP accumulation factor
-                color += ray.energy * EvaluateColor(ray, rayHit, dither, random, viewDirectionWS, positionWS, isBackground) * rcp(RAY_COUNT);
+                color += ray.energy * EvaluateColor(ray, rayHit, random, viewDirectionWS, positionWS, isBackground) * rcp(RAY_COUNT);
             }
         }
 
@@ -601,7 +726,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
         UNITY_LOOP
         for (int j = 0; j < RAY_BOUNCE; j++)
         {
-            rayHit = RayMarching(ray, dither);
+            rayHit = RayMarching(ray, rayHit.insideObject, dither);
 
             // Firefly reduction
             // From https://twitter.com/YuriyODonnell/status/1199253959086612480
@@ -614,8 +739,8 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
             random.x = GenerateRandomValue(screenUV);
             random.y = GenerateRandomValue(screenUV);
             random.z = GenerateRandomValue(screenUV);
-            
-            color += ray.energy * EvaluateColor(ray, rayHit, dither, random, viewDirectionWS, positionWS) * rcp(RAY_COUNT);
+
+            color += ray.energy * EvaluateColor(ray, rayHit, random, viewDirectionWS, positionWS) * rcp(RAY_COUNT);
 
             if (!any(ray.energy))
                 break;
@@ -633,10 +758,8 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
 
             // Add the energy we 'lose' by randomly terminating paths.
             ray.energy *= rcp(maxRayEnergy);
-
         }
     }
-
     // Filter out negative color pixels here.
     // There shouldn't be negative values since the smallest is 0.
     // [To Be Confirmed] But the "URP Rendering Debugger" reported that the effect is outputting slightly negative values.
@@ -644,9 +767,9 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
 }
 
 // Override for half precision graph.
-void EvaluateColor_half(float3 cameraPositionWS, half3 viewDirectionWS, float2 screenUV, float3 positionWS, bool isBackground, out half3 color)
+void EvaluateColor_half(float3 cameraPositionWS, half3 viewDirectionWS, float2 screenUV, out half3 color)
 {
-    EvaluateColor_float(cameraPositionWS, viewDirectionWS, screenUV, positionWS, isBackground, color);
+    EvaluateColor_float(cameraPositionWS, viewDirectionWS, screenUV, color);
 }
 
 #endif
