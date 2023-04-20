@@ -542,7 +542,18 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirec
         {
             // Refraction
             rayHit.ior = rayHit.insideObject == 1.0 ? (1.0 / rayHit.ior) : rayHit.ior; // (air / material) : (material / air)
-            ray.direction = refract(ray.direction, ImportanceSampleGGX(random.xy, rayHit.normal, rayHit.smoothness), rayHit.ior);
+            rayHit.normal = ImportanceSampleGGX(random.xy, rayHit.normal, rayHit.smoothness);
+            half3 refractDir = refract(ray.direction, rayHit.normal, rayHit.ior);
+            // Null vector check.
+            if (any(refractDir))
+            {
+                ray.direction = refractDir;
+            }
+            // Total Internal Reflection
+            else
+            {
+                ray.direction = reflect(ray.direction, rayHit.normal);
+            }
             ray.position = rayHit.position + ray.direction * RAY_BIAS;
             // Absorption
             if (rayHit.insideObject == 2.0) // Exit refractive object
@@ -669,7 +680,6 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
 
     float3 random;
     half roughnessBias = 0.0;
-    RayHit rayHit = InitializeRayHit();
 
     // Avoid shader warning that the loop only iterates once.
 #if RAY_COUNT > 1
@@ -677,6 +687,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
     for (int i = 0; i < RAY_COUNT; i++)
 #endif
     {
+        RayHit rayHit = InitializeRayHit(); // should be reinitialized for each sample.
         roughnessBias = 0.0;
         Ray ray;
         ray.position = cameraPositionWS;
