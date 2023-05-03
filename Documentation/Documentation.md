@@ -23,9 +23,11 @@ UnitySSPathTracingURP requires:
 Material Setup
 -------------
 
-Ray Marching Quality: Low should be enough for small scenes.
+Method: Blue Noise is more performance expensive, but is usually better.
 
-Dithering: Dithering can reduce the banding artifacts in sharp reflections.
+Ray Marching Quality: Very Low should be enough for small scenes.
+
+Dithering: Dithering can reduce the banding artifacts in sharp reflection & refraction.
 
 Use Reflection Probe Instead: Using Reflection Probe as the environment lighting. (Need to add **"PathTracingSetReflectionProbe.cs"** to the camera)
 
@@ -42,7 +44,13 @@ In order to avoid double environment lighting, please disable Environment Reflec
 Extensions
 -------------
 
-Accurate Thickness: Render the backface depth of scene geometries to improve the accuracy of screen space path tracing.
+Accurate Thickness: Render the backface data of scene geometries to improve the accuracy of screen space path tracing.
+
+- Disable: Do not render back-face data.
+
+- Depth: Render back-face depth.
+
+- Depth + Normals: Render back-face depth and normals. This is suggested when refraction is enabled.
 
  ![AccurateThickness](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/Settings/AccurateThickness.png)
 

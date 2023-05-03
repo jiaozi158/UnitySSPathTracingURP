@@ -448,7 +448,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
                 RenderingUtils.ReAllocateIfNeeded(ref m_BackDepthHandle, depthDesc, FilterMode.Point, TextureWrapMode.Clamp, name: "_CameraBackDepthTexture");
                 cmd.SetGlobalTexture("_CameraBackDepthTexture", m_BackDepthHandle);
 
-                ConfigureTarget(m_BackDepthHandle);
+                ConfigureTarget(m_BackDepthHandle, m_BackDepthHandle);
                 ConfigureClear(ClearFlag.Depth, Color.clear);
             }
             else if (m_AccurateThickness == AccurateThickness.DepthNormals)

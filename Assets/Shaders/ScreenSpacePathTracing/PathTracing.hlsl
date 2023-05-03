@@ -35,7 +35,7 @@
     #define STEP_SIZE             0.25
     #define MAX_STEP              48
     #define RAY_BOUNCE            4
-#elif defined(_RAY_MARCHING_VERY_LOW) // If the scene is quite "reflective", it is recommended to keep RAY_BOUNCE as 3 (or higher) for a good look.
+#elif defined(_RAY_MARCHING_VERY_LOW) // If the scene is quite "reflective" or "refractive", it is recommended to keep RAY_BOUNCE as 3 (or higher) for a good look.
     #define STEP_SIZE             0.4
     #define MAX_STEP              16
     #define RAY_BOUNCE            3
@@ -159,88 +159,92 @@ void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 
     screenUV = (screenUV * 2.0 - 1.0) * _ScreenSize.zw;
 #endif
 
-#if _RENDER_PASS_ENABLED
-    half4 gbuffer0 = LOAD_FRAMEBUFFER_INPUT(GBUFFER0, screenUV);
-    half4 gbuffer1 = LOAD_FRAMEBUFFER_INPUT(GBUFFER1, screenUV);
-    half4 gbuffer2 = LOAD_FRAMEBUFFER_INPUT(GBUFFER2, screenUV);
-#else
-    // Using SAMPLE_TEXTURE2D is faster than using LOAD_TEXTURE2D on iOS platforms (5% faster shader).
-    // Possible reason: HLSLcc upcasts Load() operation to float, which doesn't happen for Sample()?
-    half4 gbuffer0 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, screenUV, 0);
-    half4 gbuffer1 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer1, my_point_clamp_sampler, screenUV, 0);
-    half4 gbuffer2 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0);
-#endif
-    half3 gbuffer3 = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0).rgb;
-
-    bool isForward = false;
-#if defined(_IGNORE_FORWARD_OBJECTS)
-    isForward = gbuffer2.a == 0.0 ? true : false;
-#endif
-
-    // URP does not clear color GBuffer (albedo & specular), only the depth & stencil.
-    // This can cause smearing-like artifacts.
-    albedo = isForward ? half3(0.0, 0.0, 0.0) : gbuffer0.rgb;
-    
-    uint materialFlags = UnpackMaterialFlags(gbuffer0.a);
-    // 0.04 is the "Dieletric Specular" (kDieletricSpec.rgb)
-    specular = materialFlags == kMaterialFlagSpecularSetup ? gbuffer1.rgb : lerp(kDieletricSpec.rgb, max(albedo, kDieletricSpec.rgb), gbuffer1.r); // Specular & Metallic setup conversion
-    specular = isForward ? half3(0.0, 0.0, 0.0) : specular;
-
-    if (_GBUFFER_NORMALS_OCT_ON == true)
+    half4 transparentGBuffer1 = half4(0.0, 0.0, 0.0, 1.0);
+    uint surfaceType = 0;
+    bool isTransparentGBuffer = (insideObject != 2.0 && _SupportRefraction == 1.0);
+    UNITY_BRANCH
+    if (isTransparentGBuffer)
     {
-        half2 remappedOctNormalWS = half2(Unpack888ToFloat2(gbuffer2.rgb));          // values between [ 0, +1]
-        half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);          // values between [-1, +1]
-        normal = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
+        transparentGBuffer1 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer1, my_point_clamp_sampler, screenUV, 0);
+        surfaceType = UnpackMaterialFlags(transparentGBuffer1.a);
     }
-    else
-        normal = gbuffer2.rgb;
-
-    emission = gbuffer3.rgb;
-    smoothness = gbuffer2.a;
-
-    half4 transparentGBuffer1 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer1, my_point_clamp_sampler, screenUV, 0);
-    uint surfaceType = UnpackMaterialFlags(transparentGBuffer1.a);
-    if (surfaceType == 2 && insideObject != 2.0 && _SupportRefraction == 1.0)
+    UNITY_BRANCH
+    if (surfaceType == 2 && isTransparentGBuffer)
     {
-        if (insideObject == 0.0 || insideObject == 1.0)
+        half4 transparentGBuffer0 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer0, my_point_clamp_sampler, screenUV, 0);
+        half4 transparentGBuffer2 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer2, my_point_clamp_sampler, screenUV, 0);
+        albedo = transparentGBuffer0.rgb;
+        specular = kDieletricSpec.rgb;
+        ior = transparentGBuffer1.r * 2.0h + 0.921875h;
+        normal = transparentGBuffer2.rgb;
+        UNITY_BRANCH
+        if (_GBUFFER_NORMALS_OCT_ON == true)
         {
-            half4 transparentGBuffer0 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer0, my_point_clamp_sampler, screenUV, 0);
-            half4 transparentGBuffer2 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer2, my_point_clamp_sampler, screenUV, 0);
-            albedo = transparentGBuffer0.rgb;
-            specular = kDieletricSpec.rgb;
-            ior = transparentGBuffer1.r * 2.0h + 0.921875h;;
-            normal = transparentGBuffer2.rgb;
-
-            if (_GBUFFER_NORMALS_OCT_ON == true)
+            half2 remappedOctNormalWS = half2(Unpack888ToFloat2(normal));                // values between [ 0, +1]
+            half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);          // values between [-1, +1]
+            normal = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
+        }
+        UNITY_BRANCH
+        if (insideObject == 1.0)
+        {
+            half3 backNormal = half3(0.0, 0.0, 0.0);
+            UNITY_BRANCH
+            if (_BackDepthEnabled == 2.0)
             {
-                half2 remappedOctNormalWS = half2(Unpack888ToFloat2(normal));          // values between [ 0, +1]
-                half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);          // values between [-1, +1]
-                normal = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
-            }
-            
-            if (insideObject == 1.0)
-            {
-                half3 backNormal = SAMPLE_TEXTURE2D_X_LOD(_CameraBackNormalsTexture, my_point_clamp_sampler, screenUV, 0).rgb;
-                if (!any(backNormal) || _BackDepthEnabled != 2.0)
-                    normal = normal;
-                else
+                backNormal = SAMPLE_TEXTURE2D_X_LOD(_CameraBackNormalsTexture, my_point_clamp_sampler, screenUV, 0).rgb;
+                if (any(backNormal))
                     normal = -backNormal;
             }
-            smoothness = transparentGBuffer2.a;
-            emission = half3(0.0, 0.0, 0.0);
         }
+        smoothness = transparentGBuffer2.a;
+        emission = half3(0.0, 0.0, 0.0);
 
         // Enter and exit object
-        if (insideObject == 2.0)
-            insideObject = 0.0;
-        else if (insideObject == 1.0)
-            insideObject = 2.0;
-        else if (insideObject == 0.0)
-            insideObject = 1.0;
+        insideObject = (insideObject == 2.0) ? 0.0 : insideObject + 1.0;
     }
     else
     {
-        ior = -1.0; // No refraction
+    #if _RENDER_PASS_ENABLED // Unused
+        half4 gbuffer0 = LOAD_FRAMEBUFFER_INPUT(GBUFFER0, screenUV);
+        half4 gbuffer1 = LOAD_FRAMEBUFFER_INPUT(GBUFFER1, screenUV);
+        half4 gbuffer2 = LOAD_FRAMEBUFFER_INPUT(GBUFFER2, screenUV);
+    #else
+        // Using SAMPLE_TEXTURE2D is faster than using LOAD_TEXTURE2D on iOS platforms (5% faster shader).
+        // Possible reason: HLSLcc upcasts Load() operation to float, which doesn't happen for Sample()?
+        half4 gbuffer0 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, screenUV, 0);
+        half4 gbuffer1 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer1, my_point_clamp_sampler, screenUV, 0);
+        half4 gbuffer2 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0);
+    #endif
+        half3 gbuffer3 = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0).rgb;
+
+        bool isForward = false;
+    #if defined(_IGNORE_FORWARD_OBJECTS)
+        isForward = (gbuffer2.a == 0.0);
+    #endif
+
+        // URP does not clear color GBuffer (albedo & specular), only the depth & stencil.
+        // This can cause smearing-like artifacts.
+        albedo = isForward ? half3(0.0, 0.0, 0.0) : gbuffer0.rgb;
+
+        uint materialFlags = UnpackMaterialFlags(gbuffer0.a);
+        UNITY_BRANCH
+        if(isForward)
+            specular = half3(0.0, 0.0, 0.0);
+        else // 0.04 is the "Dieletric Specular" (kDieletricSpec.rgb)
+            specular = (materialFlags == kMaterialFlagSpecularSetup) ? gbuffer1.rgb : lerp(kDieletricSpec.rgb, max(albedo, kDieletricSpec.rgb), gbuffer1.r); // Specular & Metallic setup conversion
+        
+        normal = gbuffer2.rgb;
+        UNITY_BRANCH
+        if (_GBUFFER_NORMALS_OCT_ON == true)
+        {
+            half2 remappedOctNormalWS = half2(Unpack888ToFloat2(gbuffer2.rgb));          // values between [ 0, +1]
+            half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);          // values between [-1, +1]
+            normal = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
+        }       
+
+        emission = gbuffer3.rgb;
+        smoothness = gbuffer2.a;
+        ior = -1.0;
     }
 }
 //===================================================================================================================================
@@ -300,7 +304,7 @@ half3 ImportanceSampleGGX(float2 random, half3 normal, half smoothness)
     half alpha = roughness * roughness;
     half alpha2 = alpha * alpha;
 
-    half phi = 2.0 * PI * random.x;
+    half phi = TWO_PI * random.x;
     half cosTheta = sqrt((1.0 - random.y) / (1.0 + (alpha2 - 1.0) * random.y));
     half sinTheta = sqrt(1.0 - cosTheta * cosTheta);
 
@@ -320,14 +324,14 @@ half3 ImportanceSampleGGX(float2 random, half3 normal, half smoothness)
 }
 
 // If no intersection, "rayHit.distance" will remain "REAL_EPS".
-RayHit RayMarching(Ray ray, half insideObject, half dither, bool isFirstBounce = false, float2 screenUV = float2(0.5, 0.5), float3 positionWS = float3(1.0, 1.0, 1.0), float3 cameraPositionWS = float3(0.0, 0.0, 0.0))
+RayHit RayMarching(Ray ray, half insideObject, half dither)
 {
     RayHit rayHit = InitializeRayHit();
 
     half stepSize = STEP_SIZE * 0.1;
     half marchingThickness = MARCHING_THICKNESS;
     // (Safety Distance) Push the ray's marching origin to a position that is near the intersection when in first bounce.
-    half accumulatedStep = isFirstBounce ? (distance(cameraPositionWS, positionWS) - STEP_SIZE) : 0.0;
+    half accumulatedStep = 0.0;
 
     float lastDepthDiff = 0.0;
     //float2 lastRayPositionNDC = float2(0.0, 0.0);
@@ -336,7 +340,7 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, bool isFirstBounce =
     UNITY_LOOP
     for (uint i = 1; i <= MAX_STEP; i++)
     {
-        accumulatedStep += isFirstBounce ? stepSize : (stepSize + stepSize * dither);
+        accumulatedStep += stepSize + stepSize * dither;
 
         float3 rayPositionWS = ray.position + accumulatedStep * -ray.direction; // here we need viewDirectionWS
 
@@ -346,7 +350,13 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, bool isFirstBounce =
         rayPositionNDC.z = rayPositionNDC.z * 0.5 + 0.5; // -1..1 to 0..1
 #endif
 
+        // Stop marching the ray when outside screen space.
+        bool isScreenSpace = rayPositionNDC.x > 0.0 && rayPositionNDC.y > 0.0 && rayPositionNDC.x < 1.0 && rayPositionNDC.y < 1.0 ? true : false;
+        if (!isScreenSpace)
+            break;
+
         float deviceDepth; // z buffer depth
+        UNITY_BRANCH
         if (_BackDepthEnabled != 0.0)
         {
             if (insideObject == 1.0 && _SupportRefraction == 1.0)
@@ -408,11 +418,6 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, bool isFirstBounce =
         {
             stepSize = stepSize * Sign * 0.5;
         }
-        
-        // Stop marching the ray when outside screen space.
-        bool isScreenSpace = rayPositionNDC.x > 0.0 && rayPositionNDC.y > 0.0 && rayPositionNDC.x < 1.0 && rayPositionNDC.y < 1.0 ? true : false;
-        if (!isScreenSpace)
-            break;
 
         bool isSky; // Do not reflect sky, the reflection probe fallback will provide better visuals.
     #if (UNITY_REVERSED_Z == 1)
@@ -467,7 +472,7 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, bool isFirstBounce =
             // Cam->--x--|-y
             //           |
             // Using the position between "x" and "y" is more accurate than using "y" directly.
-            if (!isFirstBounce && Sign != sign(lastDepthDiff))
+            if (Sign != sign(lastDepthDiff))
             {
                 // Seems that interpolating screenUV is giving worse results, so do it for positionWS only.
                 //rayPositionNDC.xy = lerp(lastRayPositionNDC, rayPositionNDC.xy, lastDepthDiff / (lastDepthDiff - depthDiff));
@@ -527,10 +532,10 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirec
         half fresnel = F_Schlick(0.04, max(rayHit.smoothness, 0.04), saturate(dot(rayHit.normal, -ray.direction)));
 
         UNITY_BRANCH
-        if (refractChance > 0 && roulette < refractChance)
+        if (refractChance > 0.0 && roulette < refractChance)
         {
             // Refraction
-            rayHit.ior = rayHit.insideObject == 1.0 ? (1.0 / rayHit.ior) : rayHit.ior; // (air / material) : (material / air)
+            rayHit.ior = rayHit.insideObject == 1.0 ? rcp(rayHit.ior) : rayHit.ior; // (air / material) : (material / air)
             rayHit.normal = ImportanceSampleGGX(random.xy, rayHit.normal, rayHit.smoothness);
             half3 refractDir = refract(ray.direction, rayHit.normal, rayHit.ior);
             // Null vector check.
@@ -548,7 +553,7 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirec
             if (rayHit.insideObject == 2.0) // Exit refractive object
                 ray.energy *= rcp(refractChance) * exp(rayHit.albedo * max(rayHit.distance, 2.5)); // Artistic: add a minimum color absorption distance.
         }
-        else if (specChance > 0 && roulette < specChance + fresnel)
+        else if (specChance > 0.0 && roulette < specChance + fresnel)
         {
             // Specular reflection BRDF
             ray.direction = reflect(ray.direction, ImportanceSampleGGX(random.xy, rayHit.normal, rayHit.smoothness)); // Linear interpolation (lerp) doesn't match the actual specular lobes at all.
@@ -557,7 +562,7 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirec
             // [specular / dot(N, L)] * dot(N, L) / 1.0
             ray.energy *= rcp(specChance) * rayHit.specular;
         }
-        else if (diffChance > 0 && roulette < diffChance + fresnel)
+        else if (diffChance > 0.0 && roulette < diffChance + fresnel)
         {
             // Diffuse reflection BRDF
             ray.direction = SampleHemisphereCosine(random.x, random.y, rayHit.normal);
@@ -591,9 +596,9 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirec
         if (_ProbeSet == 1.0)
         {
             UNITY_BRANCH
-            if (_SpecCube0_ProbePosition.w > 0) // Box Projection Probe
+            if (_SpecCube0_ProbePosition.w > 0.0) // Box Projection Probe
             {
-                float3 factors = ((ray.direction > 0 ? _SpecCube0_BoxMax.xyz : _SpecCube0_BoxMin.xyz) - positionWS) / ray.direction;
+                float3 factors = ((ray.direction > 0 ? _SpecCube0_BoxMax.xyz : _SpecCube0_BoxMin.xyz) - positionWS) * rcp(ray.direction);
                 float scalar = min(min(factors.x, factors.y), factors.z);
                 float3 uvw = ray.direction * scalar + (positionWS - _SpecCube0_ProbePosition.xyz);
                 color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, uvw, 1), _SpecCube0_HDR).rgb * _Exposure; // "mip level 1" will provide a less noisy result.
@@ -608,9 +613,9 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirec
             {
                 half3 probe2Color = half3(0.0, 0.0, 0.0);
                 UNITY_BRANCH
-                if (_SpecCube1_ProbePosition.w > 0) // Box Projection Probe
+                if (_SpecCube1_ProbePosition.w > 0.0) // Box Projection Probe
                 {
-                    float3 factors = ((ray.direction > 0 ? _SpecCube1_BoxMax.xyz : _SpecCube1_BoxMin.xyz) - positionWS) / ray.direction;
+                    float3 factors = ((ray.direction > 0 ? _SpecCube1_BoxMax.xyz : _SpecCube1_BoxMin.xyz) - positionWS) * rcp(ray.direction);
                     float scalar = min(min(factors.x, factors.y), factors.z);
                     float3 uvw = ray.direction * scalar + (positionWS - _SpecCube1_ProbePosition.xyz);
                     probe2Color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube1, sampler_SpecCube1, uvw, 1), _SpecCube1_HDR).rgb * _Exposure;
@@ -691,8 +696,6 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
         ray.position = cameraPositionWS;
         ray.direction = -viewDirectionWS; // viewDirectionWS points to the camera.
         ray.energy = half3(1.0, 1.0, 1.0);
-
-        float time = unity_DeltaTime.y * _Time.y;
 
         // For rays from camera to scene (first bounce), add an initial distance according to the world position reconstructed from depth.
         // This allows ray marching to consider distant objects without increasing the maximum number of steps.
