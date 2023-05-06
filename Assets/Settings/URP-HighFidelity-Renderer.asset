@@ -113,4 +113,6 @@ MonoBehaviour:
   refraction: 1
   accumulation: 1
   progressBar: 1
-  denoiserIntensity: 0.5
+  temporalIntensity: 0.5
+  spatialDenoise: 1
+  useOpaqueTexture: 0

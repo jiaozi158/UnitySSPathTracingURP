@@ -76,11 +76,13 @@ MonoBehaviour:
     type: 2}
   m_PathTracingMaterial: {fileID: 2100000, guid: a67291bbecb6c2649ba10a01f0af3ccc,
     type: 2}
-  accurateThickness: 1
+  accurateThickness: 0
   refraction: 0
   accumulation: 1
   progressBar: 1
-  denoiserIntensity: 0.5
+  temporalIntensity: 0.5
+  spatialDenoise: 0
+  useOpaqueTexture: 0
 --- !u!114 &7248218767805662722
 MonoBehaviour:
   m_ObjectHideFlags: 0

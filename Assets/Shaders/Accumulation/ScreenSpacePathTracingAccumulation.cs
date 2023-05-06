@@ -23,7 +23,11 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
         [InspectorName("Real-time")]
         [Tooltip("Real-time mode will only execute in play mode.")]
-        PerObject = 2
+        PerObject = 2,
+
+        [InspectorName("Real-time + Spatial Denoise")]
+        [Tooltip("Real-time + Spatial Denoise mode will only execute in play mode.")]
+        PerObjectBlur = 3
     };
 
     public enum AccurateThickness
@@ -41,6 +45,21 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         DepthNormals = 2
     }
 
+    public enum SpatialDenoise
+    {
+        [InspectorName("Low")]
+        [Tooltip("1-Pass Denoiser.")]
+        Low = 0,
+
+        [InspectorName("Medium")]
+        [Tooltip("3-Pass Denoiser.")]
+        Medium = 1,
+
+        [InspectorName("High")]
+        [Tooltip("5-Pass Denoiser.")]
+        High = 2,
+    }
+
     [Tooltip("The material of accumulation shader.")]
     public Material m_AccumulationMaterial;
     [Tooltip("The material of path tracing shader.")]
@@ -54,14 +73,20 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     [Tooltip("Enable this to support Path Tracing refraction.")]
     public bool refraction = false;
 
-    [Header("Accumulation")]
+    [Header("Temporal Accumulation")]
     [Tooltip("The accumulation mode. Real-time mode will only execute in play mode.")]
     public Accumulation accumulation = Accumulation.Camera;
     [Tooltip("Add a progress bar to show the offline accumulation progress.")]
     public bool progressBar = true;
     [Tooltip("Controls the real-time accumulation denoising intensity.")]
     [Range(0.1f, 0.9f)]
-    public float denoiserIntensity = 0.5f;
+    public float temporalIntensity = 0.5f;
+
+    [Header("Spatial Accumulation")]
+    [Tooltip("Enable Edge-Avoiding A-Trous Denoiser.")]
+    public SpatialDenoise spatialDenoise = SpatialDenoise.Medium;
+    [Tooltip("Use Opaque Texture to avoid blurring rasterized lighting. This requires URP Opaque Texture to be enabled (with any downsampling).")]
+    public bool useOpaqueTexture = false;
 
     // Allow changing settings at runtime.
     public Accumulation AccumulationMode
@@ -84,6 +109,12 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         }
     }
 
+    public SpatialDenoise SpatialDenoiseQuality
+    {
+        get { return spatialDenoise; }
+        set { spatialDenoise = value; }
+    }
+
     public bool SupportRefraction
     {
         get { return refraction; }
@@ -100,15 +131,22 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         set { progressBar = value; }
     }
 
-    public float DenoiserIntensity
+    public bool UseOpaqueTexture
     {
-        get { return denoiserIntensity; }
-        set { denoiserIntensity = Math.Clamp(value, 0.1f, 0.9f); }
+        get { return useOpaqueTexture; }
+        set { useOpaqueTexture = value; }
+    }
+
+    public float TemporalIntensity
+    {
+        get { return temporalIntensity; }
+        set { temporalIntensity = Math.Clamp(value, 0.1f, 0.9f); }
     }
 
     private const string m_PathTracingShaderName = "Universal Render Pipeline/Screen Space Path Tracing";
     // This shader is also used by denoising.
     private const string m_AccumulationShaderName = "Hidden/AccumulateFrame";
+    private SpatialDenoisePass m_SpatialDenoisePass;
     private AccumulationPass m_AccumulationPass;
     private BackfaceDepthPass m_BackfaceDepthPass;
     private TransparentGBufferPass m_TransparentGBufferPass;
@@ -154,6 +192,13 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             m_AccumulationPass.renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing;
         }
 
+        if (m_SpatialDenoisePass == null)
+        {
+            m_SpatialDenoisePass = new SpatialDenoisePass(m_AccumulationMaterial, accumulation, m_AccumulationPass, spatialDenoise);
+            // Before TAA and transparents rendering.
+            m_SpatialDenoisePass.renderPassEvent = RenderPassEvent.BeforeRenderingTransparents;
+        }
+
         if (m_BackfaceDepthPass == null)
         {
             m_BackfaceDepthPass = new BackfaceDepthPass();
@@ -171,6 +216,8 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
     protected override void Dispose(bool disposing)
     {
+        if (m_SpatialDenoisePass != null)
+            m_SpatialDenoisePass.Dispose();
         if (m_AccumulationPass != null)
             m_AccumulationPass.Dispose();
         if (m_BackfaceDepthPass != null)
@@ -186,20 +233,27 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
         // Update accumulation mode each frame since we support runtime changing of these properties.
+        m_SpatialDenoisePass.m_Accumulation = accumulation;
+        m_SpatialDenoisePass.m_SpatialDenoise = spatialDenoise;
         m_AccumulationPass.m_Accumulation = accumulation;
 
 #if UNITY_EDITOR
         // Motion Vectors of URP SceneView don't get updated each frame when not entering play mode. (Might be fixed when supporting scene view anti-aliasing)
         // Change the method to multi-frame accumulation (offline mode) if SceneView is not in play mode.
         bool isPlayMode = UnityEditor.EditorApplication.isPlaying;
-        if (renderingData.cameraData.camera.cameraType == CameraType.SceneView && !isPlayMode && accumulation == Accumulation.PerObject)
+        if (renderingData.cameraData.camera.cameraType == CameraType.SceneView && !isPlayMode && (accumulation == Accumulation.PerObject || accumulation == Accumulation.PerObjectBlur))
+        {
+            m_SpatialDenoisePass.m_Accumulation = Accumulation.Camera;
             m_AccumulationPass.m_Accumulation = Accumulation.Camera;
+        }
 #endif
 
         // No need to accumulate when rendering reflection probes, this will also break game view accumulation.
         bool shouldAccumulate = (accumulation == Accumulation.Camera) ? (renderingData.cameraData.camera.cameraType != CameraType.Reflection) : (renderingData.cameraData.camera.cameraType != CameraType.Reflection && renderingData.cameraData.camera.cameraType != CameraType.Preview);
         if (shouldAccumulate)
         {
+            renderer.EnqueuePass(m_SpatialDenoisePass);
+
             // Update progress bar toggle each frame since we support runtime changing of these properties.
             m_AccumulationPass.m_ProgressBar = progressBar;
             renderer.EnqueuePass(m_AccumulationPass);
@@ -218,19 +272,100 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             m_PathTracingMaterial.SetFloat("_BackDepthEnabled", 0.0f);
         }
 
-        if (accumulation == Accumulation.PerObject)
-            m_AccumulationMaterial.SetFloat("_DenoiserIntensity", denoiserIntensity);
+        if (accumulation == Accumulation.PerObject || accumulation == Accumulation.PerObjectBlur)
+        {
+            m_AccumulationMaterial.SetFloat("_DenoiserIntensity", temporalIntensity);
+            m_AccumulationMaterial.SetFloat("_UseOpaqueTexture", useOpaqueTexture ? 1.0f : 0.0f);
+        }
 
         if (refraction)
         {
             m_PathTracingMaterial.SetFloat("_SupportRefraction", 1.0f);
             renderer.EnqueuePass(m_TransparentGBufferPass);
+            m_AccumulationMaterial.SetFloat("_TransparentGBuffers", 1.0f);
         }
         else
         {
             m_PathTracingMaterial.SetFloat("_SupportRefraction", 0.0f);
+            m_AccumulationMaterial.SetFloat("_TransparentGBuffers", 0.0f);
         }
             
+    }
+
+    public class SpatialDenoisePass : ScriptableRenderPass
+    {
+        private AccumulationPass m_AccumulationPass;
+        private Material m_AccumulationMaterial;
+        private RTHandle m_AccumulateColorHandle;
+
+        public SpatialDenoise m_SpatialDenoise;
+        public Accumulation m_Accumulation;
+
+        public SpatialDenoisePass(Material accuMaterial, Accumulation accumulation, AccumulationPass accumulationPass, SpatialDenoise spatialDenoise)
+        {
+            m_AccumulationMaterial = accuMaterial;
+            m_Accumulation = accumulation;
+            m_AccumulationPass = accumulationPass;
+            m_SpatialDenoise = spatialDenoise;
+        }
+
+        public void Dispose()
+        {
+            if (m_Accumulation != Accumulation.None)
+                m_AccumulateColorHandle?.Release();
+        }
+
+        public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
+        {
+            var desc = renderingData.cameraData.cameraTargetDescriptor;
+            desc.depthBufferBits = 0; // Color and depth cannot be combined in RTHandles
+
+            if (m_Accumulation != Accumulation.None)
+                RenderingUtils.ReAllocateIfNeeded(ref m_AccumulateColorHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_PathTracingAccumulationTexture");
+
+            if (m_AccumulationPass != null && m_AccumulationPass.m_AccumulateColorHandle == null)
+                m_AccumulationPass.m_AccumulateColorHandle = m_AccumulateColorHandle;
+        }
+
+        public override void FrameCleanup(CommandBuffer cmd)
+        {
+            if (m_Accumulation != Accumulation.None)
+                cmd.ReleaseTemporaryRT(Shader.PropertyToID(m_AccumulateColorHandle.name));
+        }
+
+        public override void OnCameraCleanup(CommandBuffer cmd)
+        {
+            if (m_Accumulation != Accumulation.None)
+                m_AccumulateColorHandle = null;
+        }
+
+        public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
+        {
+            if (m_Accumulation == Accumulation.PerObjectBlur && m_SpatialDenoise != SpatialDenoise.Low)
+            {
+                CommandBuffer cmd = CommandBufferPool.Get();
+                using (new ProfilingScope(cmd, new ProfilingSampler("Path Tracing Spatial Denoise")))
+                {
+                    // Load & Store actions are important to support acculumation.
+                    cmd.SetRenderTarget(
+                        m_AccumulateColorHandle,
+                        RenderBufferLoadAction.DontCare,
+                        RenderBufferStoreAction.Store,
+                        m_AccumulateColorHandle,
+                        RenderBufferLoadAction.DontCare,
+                        RenderBufferStoreAction.DontCare);
+
+                    for (int i = 0; i < ((int)m_SpatialDenoise); i++)
+                    {
+                        cmd.Blit(renderingData.cameraData.renderer.cameraColorTargetHandle, m_AccumulateColorHandle, m_AccumulationMaterial, 3);
+                        cmd.Blit(m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle.rt, m_AccumulationMaterial, 3);
+                    }
+                }
+                context.ExecuteCommandBuffer(cmd);
+                cmd.Clear();
+                CommandBufferPool.Release(cmd);
+            }
+        }
     }
 
     public class AccumulationPass : ScriptableRenderPass
@@ -238,7 +373,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         public int sample = 0;
 
         private Material m_AccumulationMaterial;
-        private RTHandle m_AccumulateColorHandle;
+        public RTHandle m_AccumulateColorHandle;
         private RTHandle m_AccumulateHistoryHandle;
 
         public Accumulation m_Accumulation;
@@ -261,9 +396,9 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
         public void Dispose()
         {
-            if (m_Accumulation == Accumulation.Camera || m_Accumulation == Accumulation.PerObject)
+            if (m_Accumulation != Accumulation.None)
                 m_AccumulateColorHandle?.Release();
-            if (m_Accumulation == Accumulation.PerObject)
+            if (m_Accumulation == Accumulation.PerObject || m_Accumulation == Accumulation.PerObjectBlur)
                 m_AccumulateHistoryHandle?.Release();
         }
 
@@ -272,9 +407,9 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             var desc = renderingData.cameraData.cameraTargetDescriptor;
             desc.depthBufferBits = 0; // Color and depth cannot be combined in RTHandles
 
-            if (m_Accumulation == Accumulation.Camera || m_Accumulation == Accumulation.PerObject)
+            if (m_Accumulation != Accumulation.None)
                 RenderingUtils.ReAllocateIfNeeded(ref m_AccumulateColorHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_PathTracingAccumulationTexture");
-            if (m_Accumulation == Accumulation.PerObject)
+            if (m_Accumulation == Accumulation.PerObject || m_Accumulation == Accumulation.PerObjectBlur)
             {
                 RenderingUtils.ReAllocateIfNeeded(ref m_AccumulateHistoryHandle, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_PathTracingHistoryTexture");
                 cmd.SetGlobalTexture("_PathTracingHistoryTexture", m_AccumulateHistoryHandle);
@@ -283,7 +418,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             ConfigureTarget(renderingData.cameraData.renderer.cameraColorTargetHandle);
             ConfigureClear(ClearFlag.None, Color.black);
 
-            if (m_Accumulation == Accumulation.PerObject)
+            if (m_Accumulation == Accumulation.PerObject || m_Accumulation == Accumulation.PerObjectBlur)
                 ConfigureInput(ScriptableRenderPassInput.Motion);
 
             if (m_Accumulation == Accumulation.Camera)
@@ -309,17 +444,17 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         public override void FrameCleanup(CommandBuffer cmd)
         {
             //cmd.ReleaseTemporaryRT(m_AccumulateColorHandle.GetInstanceID());
-            if (m_Accumulation == Accumulation.Camera || m_Accumulation == Accumulation.PerObject)
+            if (m_Accumulation != Accumulation.None)
                 cmd.ReleaseTemporaryRT(Shader.PropertyToID(m_AccumulateColorHandle.name));
-            if (m_Accumulation == Accumulation.PerObject)
+            if (m_Accumulation == Accumulation.PerObject || m_Accumulation == Accumulation.PerObjectBlur)
                 cmd.ReleaseTemporaryRT(Shader.PropertyToID(m_AccumulateHistoryHandle.name));
         }
 
         public override void OnCameraCleanup(CommandBuffer cmd)
         {
-            if (m_Accumulation == Accumulation.Camera || m_Accumulation == Accumulation.PerObject)
+            if (m_Accumulation != Accumulation.None)
                 m_AccumulateColorHandle = null;
-            if (m_Accumulation == Accumulation.PerObject)
+            if (m_Accumulation == Accumulation.PerObject || m_Accumulation == Accumulation.PerObjectBlur)
                 m_AccumulateHistoryHandle = null;
 
         }
@@ -344,8 +479,8 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
                     m_AccumulationMaterial.SetFloat("_Sample", sample);
 
                     // If the HDR precision is set to 64 Bits, the maximum sample can be 512.
-                    UnityEngine.Experimental.Rendering.GraphicsFormat currentGraphicsFormat = m_AccumulateColorHandle.rt.graphicsFormat;
-                    int maxSample = currentGraphicsFormat == UnityEngine.Experimental.Rendering.GraphicsFormat.B10G11R11_UFloatPack32 ? 64 : 512;
+                    GraphicsFormat currentGraphicsFormat = m_AccumulateColorHandle.rt.graphicsFormat;
+                    int maxSample = currentGraphicsFormat == GraphicsFormat.B10G11R11_UFloatPack32 ? 64 : 512;
                     m_AccumulationMaterial.SetFloat("_MaxSample", maxSample);
                     if (sample < maxSample)
                         sample++;
@@ -381,7 +516,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
                     else
                         cmd.Blit(m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle);
                 }
-                else if (m_Accumulation == Accumulation.PerObject)
+                else if (m_Accumulation == Accumulation.PerObject || m_Accumulation == Accumulation.PerObjectBlur)
                 {
                     // Load & Store actions are important to support acculumation.
                     cmd.SetRenderTarget(
@@ -392,7 +527,10 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
                         RenderBufferLoadAction.DontCare,
                         RenderBufferStoreAction.DontCare);
 
-                    cmd.Blit(renderingData.cameraData.renderer.cameraColorTargetHandle, m_AccumulateColorHandle);
+                    if (m_Accumulation == Accumulation.PerObjectBlur)
+                        cmd.Blit(renderingData.cameraData.renderer.cameraColorTargetHandle, m_AccumulateColorHandle, m_AccumulationMaterial, 3);
+                    else
+                        cmd.Blit(renderingData.cameraData.renderer.cameraColorTargetHandle, m_AccumulateColorHandle);
 
                     cmd.Blit(m_AccumulateColorHandle, renderingData.cameraData.renderer.cameraColorTargetHandle.rt, m_AccumulationMaterial, 2);
 

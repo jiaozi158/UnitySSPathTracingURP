@@ -324,11 +324,12 @@ half3 ImportanceSampleGGX(float2 random, half3 normal, half smoothness)
 }
 
 // If no intersection, "rayHit.distance" will remain "REAL_EPS".
-RayHit RayMarching(Ray ray, half insideObject, half dither)
+RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance = 0.0)
 {
     RayHit rayHit = InitializeRayHit();
 
-    half stepSize = STEP_SIZE * 0.1;
+    // Use a small step size only when objects are close to the camera.
+    half stepSize = STEP_SIZE * lerp(0.05, 1.0, sceneDistance * 0.02);
     half marchingThickness = MARCHING_THICKNESS;
     // (Safety Distance) Push the ray's marching origin to a position that is near the intersection when in first bounce.
     half accumulatedStep = 0.0;
@@ -700,9 +701,9 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
         // For rays from camera to scene (first bounce), add an initial distance according to the world position reconstructed from depth.
         // This allows ray marching to consider distant objects without increasing the maximum number of steps.
         {
-            rayHit.position = cameraPositionWS + length(cameraPositionWS - positionWS) * viewDirectionWS;
-            
-            rayHit.distance = STEP_SIZE;
+            rayHit.distance = length(cameraPositionWS - positionWS);
+            rayHit.position = cameraPositionWS + rayHit.distance * viewDirectionWS;
+
             HitSurfaceDataFromGBuffer(screenUV, rayHit.albedo, rayHit.specular, rayHit.normal, rayHit.emission, rayHit.smoothness, rayHit.ior, rayHit.insideObject);
 
             random.x = GenerateRandomValue(screenUV);
@@ -738,7 +739,8 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
         UNITY_LOOP
         for (int j = 0; j < RAY_BOUNCE; j++)
         {
-            rayHit = RayMarching(ray, rayHit.insideObject, dither);
+            half sceneDistance = (j == 0) ? rayHit.distance : 0.0;
+            rayHit = RayMarching(ray, rayHit.insideObject, dither, sceneDistance);
 
             // Firefly reduction
             // From https://twitter.com/YuriyODonnell/status/1199253959086612480

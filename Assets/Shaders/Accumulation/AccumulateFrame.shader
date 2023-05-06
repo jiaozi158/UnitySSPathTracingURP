@@ -6,6 +6,8 @@ Shader "Hidden/AccumulateFrame"
 		[HideInInspector] _Sample("Total Sample", Float) = 0.0
 		[HideInInspector] _MaxSample("Maximum Sample", Float) = 64.0
 		[HideInInspector] _DenoiserIntensity("Denoiser Intensity", Float) = 0.5
+		[HideInInspector] _TransparentGBuffers("Additional Lighting Models", Float) = 0.0
+		[HideInInspector] _UseOpaqueTexture("Denoiser Use Opaque Texture", Float) = 0.0
 	}
 
 	SubShader
@@ -32,6 +34,8 @@ Shader "Hidden/AccumulateFrame"
 			half _Sample;
 			half _MaxSample;
 			half _DenoiserIntensity;
+			half _TransparentGBuffers;
+			half _UseOpaqueTexture;
 			float4 _MainTex_TexelSize;
 			CBUFFER_END
 
@@ -93,6 +97,8 @@ Shader "Hidden/AccumulateFrame"
 			half _Sample;
 			half _MaxSample;
 			half _DenoiserIntensity;
+			half _TransparentGBuffers;
+			half _UseOpaqueTexture;
 			float4 _MainTex_TexelSize;
 			CBUFFER_END
 
@@ -174,6 +180,8 @@ Shader "Hidden/AccumulateFrame"
 			half _Sample;
 			half _MaxSample;
 			half _DenoiserIntensity;
+			half _TransparentGBuffers;
+			half _UseOpaqueTexture;
 			float4 _MainTex_TexelSize;
 			CBUFFER_END
 
@@ -255,11 +263,13 @@ Shader "Hidden/AccumulateFrame"
 					AdjustColorBox(boxMin, boxMax, moment1, moment2, input.uv, 1.0, 0.0);
 					AdjustColorBox(boxMin, boxMax, moment1, moment2, input.uv, 0.0, 1.0);
 
+					/*
 					// remaining pixels in a 9x9 square (excluding center)
 					AdjustColorBox(boxMin, boxMax, moment1, moment2, input.uv, -1.0, -1.0);
 					AdjustColorBox(boxMin, boxMax, moment1, moment2, input.uv, 1.0, -1.0);
 					AdjustColorBox(boxMin, boxMax, moment1, moment2, input.uv, -1.0, 1.0);
 					AdjustColorBox(boxMin, boxMax, moment1, moment2, input.uv, 1.0, 1.0);
+					*/
 					
 					// Motion Vectors
 					half bestOffsetX = 0.0;
@@ -273,11 +283,13 @@ Shader "Hidden/AccumulateFrame"
 					AdjustBestDepthOffset(bestDepth, bestOffsetX, bestOffsetY, input.uv, -1.0, 0.0);
 					AdjustBestDepthOffset(bestDepth, bestOffsetX, bestOffsetY, input.uv, 0.0, 1.0);
 
+					/*
 					// remaining pixels in a 9x9 square
 					AdjustBestDepthOffset(bestDepth, bestOffsetX, bestOffsetY, input.uv, -1.0, -1.0);
 					AdjustBestDepthOffset(bestDepth, bestOffsetX, bestOffsetY, input.uv, 1.0, -1.0);
 					AdjustBestDepthOffset(bestDepth, bestOffsetX, bestOffsetY, input.uv, -1.0, 1.0);
 					AdjustBestDepthOffset(bestDepth, bestOffsetX, bestOffsetY, input.uv, 1.0, 1.0);
+					*/
 
 					half2 depthOffsetUv = half2(bestOffsetX, bestOffsetY);
 					half2 velocity = GetVelocityWithOffset(input.uv, depthOffsetUv);
@@ -293,6 +305,201 @@ Shader "Hidden/AccumulateFrame"
 					half intensity = saturate(min(_DenoiserIntensity - (abs(velocity.x)) * _DenoiserIntensity, _DenoiserIntensity - (abs(velocity.y)) * _DenoiserIntensity));
 
 					return half4(prevColor, intensity);
+				}
+			}
+			ENDHLSL
+		}
+
+		Pass
+		{
+			Name "Edge-Avoiding Spatial Denoise"
+			Tags { "LightMode" = "Spatial Accumulation" }
+
+			// No culling or depth
+			Cull Off ZWrite Off ZTest Always
+			Blend One Zero
+
+			HLSLPROGRAM
+			#pragma vertex vert
+			#pragma fragment frag
+
+			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+			TEXTURE2D_X(_MainTex);
+			TEXTURE2D_X(_CameraDepthAttachment);
+
+			TEXTURE2D_X_HALF(_GBuffer0);
+			TEXTURE2D_X_HALF(_GBuffer2);
+
+			TEXTURE2D_X_HALF(_TransparentGBuffer0);
+			TEXTURE2D_X_HALF(_TransparentGBuffer1);
+			TEXTURE2D_X_HALF(_TransparentGBuffer2);
+			SAMPLER(my_point_clamp_sampler);
+
+			TEXTURE2D_X(_CameraOpaqueTexture);
+			SAMPLER(sampler_CameraOpaqueTexture);
+		
+			CBUFFER_START(UnityPerMaterial)
+			half _Sample;
+			half _MaxSample;
+			half _DenoiserIntensity;
+			half _TransparentGBuffers;
+			half _UseOpaqueTexture;
+			float4 _MainTex_TexelSize;
+			CBUFFER_END
+			
+			struct Attributes
+			{
+				float4 positionOS : POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			struct Varyings
+			{
+				float4 positionCS : SV_POSITION;
+				float2 uv : TEXCOORD1;
+			};
+
+			Varyings vert(Attributes input)
+			{
+				Varyings output;
+				output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+				output.uv = input.uv;
+				return output;
+			}
+
+			half4 frag(Varyings input) : SV_Target
+			{
+				// Edge-Avoiding A-TrousWavelet Transform for denoising
+				// Modified from "https://www.shadertoy.com/view/ldKBzG"
+				// feel free to use it
+
+				// Dynamic dilation rate
+				// This reduces repetitive artifacts of A-Trous filtering.
+				half intensity = floor(lerp(3.0, 16.0, GenerateHashedRandomFloat(uint3(input.uv * _ScreenSize.xy, 1))));
+				
+				// 3x3 gaussian kernel texel offset
+				const half2 offset[9] =
+				{
+					half2(-1.0, -1.0), half2(0.0, -1.0), half2(1.0, -1.0),  // offset[0]..[2]
+					half2(-1.0, 0.0), half2(0.0, 0.0), half2(1.0, 0.0),     // offset[3]..[5]
+					half2(-1.0, 1.0), half2(0.0, 1.0), half2(1.0, 1.0)      // offset[6]..[8]
+				};
+
+				// 3x3 approximate gaussian kernel
+				const half kernel[9] =
+				{
+					half(0.0625), half(0.125), half(0.0625),  // kernel[0]..[2]
+					half(0.125), half(0.25), half(0.125),     // kernel[3]..[5]
+					half(0.0625), half(0.125), half(0.0625)   // kernel[6]..[8]
+				};
+
+				// URP doesn't clear color targets of GBuffers, only depth and stencil.
+				float deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthAttachment, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(input.uv), 0).r;
+				bool isSky;
+				#if (UNITY_REVERSED_Z == 1)
+					isSky = deviceDepth == 0.0;
+				#else
+					isSky = deviceDepth == 1.0; // OpenGL Platforms.
+				#endif
+
+				UNITY_BRANCH
+				if (isSky)
+				{
+					return SAMPLE_TEXTURE2D_X_LOD(_MainTex, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(input.uv), 0);
+				}
+				else
+				{
+					bool transparentGBuffers = false;
+					UNITY_BRANCH
+					if (_TransparentGBuffers == 1.0)
+					{
+						uint surfaceType = uint((SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer1, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(input.uv), 0).a * 255.0h) + 0.5h);
+						transparentGBuffers = surfaceType == 2;
+					}
+
+					half3 centerColor = SAMPLE_TEXTURE2D_X_LOD(_MainTex, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(input.uv), 0).rgb;
+					half3 centerEmission = half3(0.0, 0.0, 0.0);
+					UNITY_BRANCH
+					if (_UseOpaqueTexture == 1.0 && !transparentGBuffers)
+						centerEmission = SAMPLE_TEXTURE2D_X_LOD(_CameraOpaqueTexture, sampler_CameraOpaqueTexture, UnityStereoTransformScreenSpaceTex(input.uv), 0).rgb;
+
+					half3 centerNormal;
+					half3 centerAlbedo;
+					UNITY_BRANCH
+					if (transparentGBuffers)
+					{
+						centerNormal = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer2, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(input.uv), 0).rgb;
+						if (!any(centerNormal))
+							centerNormal = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(input.uv), 0).rgb;
+						centerAlbedo = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer0, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(input.uv), 0).rgb;
+						if (!any(centerAlbedo))
+							centerAlbedo = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(input.uv), 0).rgb;
+					}
+					else
+					{
+						centerNormal = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(input.uv), 0).rgb;
+						centerAlbedo = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(input.uv), 0).rgb;
+					}
+
+					half3 sumColor = half3(0.0, 0.0, 0.0);
+					half sumWeight = half(0.0);
+					for (uint i = 0; i < 9; i++)
+					{
+						float2 uv = UnityStereoTransformScreenSpaceTex(input.uv + offset[i] * intensity * _MainTex_TexelSize.xy);
+
+						half3 color = SAMPLE_TEXTURE2D_X_LOD(_MainTex, my_point_clamp_sampler, uv, 0).rgb;
+						half3 diff = centerColor - color;
+						half distance = dot(diff, diff);
+						half colorWeight = min(exp(-distance * 1.1), 1.0); // rcp(0.9)
+
+						half emissionWeight = half(1.0);
+						UNITY_BRANCH
+						if (_UseOpaqueTexture == 1.0 && !transparentGBuffers)
+						{
+							half3 emission = SAMPLE_TEXTURE2D_X_LOD(_CameraOpaqueTexture, sampler_CameraOpaqueTexture, uv, 0).rgb;
+							diff = centerEmission - emission;
+							distance = dot(diff, diff);
+							emissionWeight = min(exp(-distance * 2000.0), 1.0); // rcp(0.0005)
+						}
+
+						half3 normal;
+						UNITY_BRANCH
+						if (transparentGBuffers)
+						{
+							normal = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer2, my_point_clamp_sampler, uv, 0).rgb;
+							if (!any(normal))
+								normal = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, uv, 0).rgb;
+						}
+						else
+							normal = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, uv, 0).rgb;
+
+						diff = centerNormal - normal;
+						distance = max(dot(diff, diff), 0.0);
+						half normalWeight = min(exp(-distance * 20.0), 1.0); // rcp(0.05)
+
+						half3 albedo;
+						UNITY_BRANCH
+						if (transparentGBuffers)
+						{ 
+							albedo = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer0, my_point_clamp_sampler, uv, 0).rgb;
+							if (!any(albedo))
+								albedo = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, uv, 0).rgb;
+						}
+						else
+							albedo = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, uv, 0).rgb;
+
+						diff = sqrt(centerAlbedo) - sqrt(albedo);
+						distance = dot(diff, diff);
+						half albedoWeight = min(exp(-distance * 400.0), 1.0); // rcp(0.0025)
+
+						half weight = colorWeight * emissionWeight * normalWeight * albedoWeight * kernel[i];
+
+						sumColor += color * weight;
+						sumWeight += weight;
+					}
+
+					return half4(sumColor * rcp(sumWeight), 1.0);
 				}
 			}
 			ENDHLSL
