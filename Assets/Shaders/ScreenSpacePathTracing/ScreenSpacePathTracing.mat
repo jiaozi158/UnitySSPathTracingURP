@@ -13,13 +13,14 @@ Material:
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
-  - _DITHERING
+  - _FP_REFL_PROBE_ATLAS
   - _METHOD_BLUE_NOISE
   - _RAY_MARCHING_LOW
   - _USE_REFLECTION_PROBE
   m_InvalidKeywords:
   - METHOD_BLUE_NOISE
   - NOISE_BLUE_NOISE
+  - _DITHERING
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
@@ -123,6 +124,7 @@ Material:
     - _DetailAlbedoMapScale: 1
     - _DetailNormalMapScale: 1
     - _Dither_Intensity: 1.5
+    - _Dithering: 1
     - _DstBlend: 0
     - _DstBlendAlpha: 0
     - _EnvironmentReflections: 1

@@ -37,8 +37,8 @@
     #define RAY_BOUNCE            4
 #elif defined(_RAY_MARCHING_VERY_LOW) // If the scene is quite "reflective" or "refractive", it is recommended to keep RAY_BOUNCE as 3 (or higher) for a good look.
     #define STEP_SIZE             0.4
-    #define MAX_STEP              16
-    #define RAY_BOUNCE            3
+    #define MAX_STEP              12
+    #define RAY_BOUNCE            2
 #else //defined(_RAY_MARCHING_LOW)
     #define STEP_SIZE             0.3
     #define MAX_STEP              32
@@ -94,6 +94,10 @@ FRAMEBUFFER_INPUT_HALF(GBUFFER0);
 FRAMEBUFFER_INPUT_HALF(GBUFFER1);
 FRAMEBUFFER_INPUT_HALF(GBUFFER2);
 #endif
+
+// Reflection Probes Sampling
+#include "./PathTracingFallback.hlsl" //_with_pragmas
+
 //===================================================================================================================================
 
 // Helper functions
@@ -195,6 +199,8 @@ void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 
                 if (any(backNormal))
                     normal = -backNormal;
             }
+            else
+                normal = -normal;
         }
         smoothness = transparentGBuffer2.a;
         emission = half3(0.0, 0.0, 0.0);
@@ -382,6 +388,7 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance =
         float deviceBackDepth = 0.0;
         float sceneBackDepth = 0.0;
         float backDepthDiff = 0.0;
+        bool backDepthValid = false; // Avoid infinite thickness for objects with no thickness (ex. Plane).
         UNITY_BRANCH
         if (_BackDepthEnabled != 0.0)
         {
@@ -391,7 +398,6 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance =
                 deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, sampler_CameraBackDepthTexture, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
             sceneBackDepth = -LinearEyeDepth(deviceBackDepth, _ZBufferParams); // z buffer back depth
 
-            bool backDepthValid; // Avoid infinite thickness for objects with no thickness (ex. Plane).
     #if (UNITY_REVERSED_Z == 1)
             backDepthValid = deviceBackDepth != 0.0 ? true : false;
     #else
@@ -408,9 +414,9 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance =
         // Sign is negative : ray is behind the actual intersection.
         half Sign;
         if (hitDepth < sceneBackDepth)
-            Sign = sign(backDepthDiff);
+            Sign = FastSign(backDepthDiff);
         else
-            Sign = sign(depthDiff);
+            Sign = FastSign(depthDiff);
         startBinarySearch = startBinarySearch || (Sign == -1) ? true : false; // Start binary search when the ray is behind the actual intersection.
 
         // Half the step size each time when binary search starts.
@@ -436,17 +442,10 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance =
         UNITY_BRANCH
         if (_BackDepthEnabled != 0.0)
         {
-            bool backDepthValid; // Avoid infinite thickness for objects with no thickness (ex. Plane).
-        #if (UNITY_REVERSED_Z == 1)
-            backDepthValid = deviceBackDepth != 0.0 ? true : false;
-        #else
-            backDepthValid = deviceBackDepth != 1.0 ? true : false; // OpenGL Platforms.
-        #endif
-
             // Ignore the incorrect "backDepthDiff" when objects (ex. Plane with front face only) has no thickness and blocks the backface depth rendering of objects behind it.
             if ((sceneBackDepth <= sceneDepth) && backDepthValid)
             {
-                hitSuccessful = (isScreenSpace && (depthDiff <= 0.0) && (hitDepth - sceneBackDepth >= 0.0) && !isSky) ? true : false;
+                hitSuccessful = (isScreenSpace && (depthDiff <= 0.0) && (hitDepth >= sceneBackDepth) && !isSky) ? true : false;
                 isBackHit = (hitDepth > sceneBackDepth && Sign > 0.0) ? true : false;
             }
             else
@@ -473,7 +472,7 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance =
             // Cam->--x--|-y
             //           |
             // Using the position between "x" and "y" is more accurate than using "y" directly.
-            if (Sign != sign(lastDepthDiff))
+            if (Sign != FastSign(lastDepthDiff))
             {
                 // Seems that interpolating screenUV is giving worse results, so do it for positionWS only.
                 //rayPositionNDC.xy = lerp(lastRayPositionNDC, rayPositionNDC.xy, lastDepthDiff / (lastDepthDiff - depthDiff));
@@ -515,7 +514,7 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance =
     return rayHit;
 }
 
-half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirectionWS, float3 positionWS, bool isBackground = false)
+half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirectionWS, float3 positionWS, float2 screenUV, bool isBackground = false)
 {
     // If the ray intersects the scene.
     if (rayHit.distance > REAL_EPS)
@@ -592,44 +591,8 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirec
 
         half3 color = half3(0.0, 0.0, 0.0);
     #ifdef _USE_REFLECTION_PROBE
-        // Check if the reflection probes are correctly set.
-        UNITY_BRANCH
-        if (_ProbeSet == 1.0)
-        {
-            UNITY_BRANCH
-            if (_SpecCube0_ProbePosition.w > 0.0) // Box Projection Probe
-            {
-                float3 factors = ((ray.direction > 0 ? _SpecCube0_BoxMax.xyz : _SpecCube0_BoxMin.xyz) - positionWS) * rcp(ray.direction);
-                float scalar = min(min(factors.x, factors.y), factors.z);
-                float3 uvw = ray.direction * scalar + (positionWS - _SpecCube0_ProbePosition.xyz);
-                color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, uvw, 1), _SpecCube0_HDR).rgb * _Exposure; // "mip level 1" will provide a less noisy result.
-            }
-            else
-            {
-                color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube0, sampler_SpecCube0, ray.direction, 1), _SpecCube0_HDR).rgb * _Exposure;
-            }
-
-            UNITY_BRANCH
-            if (_ProbeWeight > 0.0) // Probe Blending Enabled
-            {
-                half3 probe2Color = half3(0.0, 0.0, 0.0);
-                UNITY_BRANCH
-                if (_SpecCube1_ProbePosition.w > 0.0) // Box Projection Probe
-                {
-                    float3 factors = ((ray.direction > 0 ? _SpecCube1_BoxMax.xyz : _SpecCube1_BoxMin.xyz) - positionWS) * rcp(ray.direction);
-                    float scalar = min(min(factors.x, factors.y), factors.z);
-                    float3 uvw = ray.direction * scalar + (positionWS - _SpecCube1_ProbePosition.xyz);
-                    probe2Color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube1, sampler_SpecCube1, uvw, 1), _SpecCube1_HDR).rgb * _Exposure;
-                }
-                else
-                {
-                    probe2Color = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SpecCube1, sampler_SpecCube1, ray.direction, 1), _SpecCube1_HDR).rgb * _Exposure;
-                }
-                // Blend the probes if necessary.
-                color = lerp(color, probe2Color, _ProbeWeight).rgb;
-            }
-        }
-        
+        // Reflection Probes Fallback
+        color = SampleReflectionProbes(ray.direction, positionWS, 1.0h, screenUV);
     #else
         color = SAMPLE_TEXTURECUBE_LOD(_Static_Lighting_Sky, sampler_Static_Lighting_Sky, ray.direction, 0).rgb * _Exposure;
     #endif
@@ -659,14 +622,16 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
 #endif
 
     half dither = 0.0;
-#if defined(_DITHERING)
+    UNITY_BRANCH
+    if (_Dithering)
+    {
     #if defined(_RAY_MARCHING_VERY_LOW)
         // Double the dither intensity if ray marching quality is set to very low (large STEP_SIZE).
         dither = (GenerateRandomValue(screenUV) * 0.4 - 0.2) * _Dither_Intensity; // Range from -0.2 to 0.2 (assuming intensity is 1)
     #else
         dither = (GenerateRandomValue(screenUV) * 0.2 - 0.1) * _Dither_Intensity; // Range from -0.1 to 0.1 (assuming intensity is 1)
     #endif
-#endif
+    }
 
     // Avoid shader warning of using unintialized value.
     color = half3(0.0, 0.0, 0.0);
@@ -731,7 +696,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
                 roughnessBias += oldRoughness * 0.75;
 
                 // energy * emission * SPP accumulation factor
-                color += ray.energy * EvaluateColor(ray, rayHit, random, viewDirectionWS, positionWS, isBackground) * rcp(RAY_COUNT);
+                color += ray.energy * EvaluateColor(ray, rayHit, random, viewDirectionWS, positionWS, screenUV, isBackground) * rcp(RAY_COUNT);
             }
         }
 
@@ -754,7 +719,7 @@ void EvaluateColor_float(float3 cameraPositionWS, half3 viewDirectionWS, float2 
             random.y = GenerateRandomValue(screenUV);
             random.z = GenerateRandomValue(screenUV);
 
-            color += ray.energy * EvaluateColor(ray, rayHit, random, viewDirectionWS, positionWS) * rcp(RAY_COUNT);
+            color += ray.energy * EvaluateColor(ray, rayHit, random, viewDirectionWS, positionWS, screenUV) * rcp(RAY_COUNT);
 
             if (!any(ray.energy))
                 break;

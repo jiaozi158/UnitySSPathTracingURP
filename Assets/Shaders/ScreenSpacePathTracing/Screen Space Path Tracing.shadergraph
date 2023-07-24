@@ -68,14 +68,17 @@
         },
         {
             "m_Id": "b096a87e24f0466886ac847774e8e266"
+        },
+        {
+            "m_Id": "6b4fc97e34a6432bb9fb0a98370ba556"
+        },
+        {
+            "m_Id": "bc61efdff4f945ef9b99bebf9ecd3b69"
         }
     ],
     "m_Keywords": [
         {
             "m_Id": "f988b41e9237496c8bcfdcf5283b5cbf"
-        },
-        {
-            "m_Id": "1ea878323bfa4a8c84693464da12f273"
         },
         {
             "m_Id": "20a054d88261409cae1cf0cd728526ec"
@@ -85,6 +88,9 @@
         },
         {
             "m_Id": "108ee751e9154cf69eaa5e8d3267ead0"
+        },
+        {
+            "m_Id": "c1a31fead78d430aa48c873e54bae446"
         }
     ],
     "m_Dropdowns": [],
@@ -528,31 +534,6 @@
 }
 
 {
-    "m_SGVersion": 1,
-    "m_Type": "UnityEditor.ShaderGraph.ShaderKeyword",
-    "m_ObjectId": "1ea878323bfa4a8c84693464da12f273",
-    "m_Guid": {
-        "m_GuidSerialized": "cfea22b2-a651-4888-87f5-5f1af34c0a37"
-    },
-    "m_Name": "Dithering",
-    "m_DefaultRefNameVersion": 1,
-    "m_RefNameGeneratedByDisplayName": "Dithering",
-    "m_DefaultReferenceName": "_DITHERING",
-    "m_OverrideReferenceName": "",
-    "m_GeneratePropertyBlock": true,
-    "m_UseCustomSlotLabel": false,
-    "m_CustomSlotLabel": "",
-    "m_DismissedVersion": 0,
-    "m_KeywordType": 0,
-    "m_KeywordDefinition": 0,
-    "m_KeywordScope": 0,
-    "m_KeywordStages": 2,
-    "m_Entries": [],
-    "m_Value": 0,
-    "m_IsEditable": true
-}
-
-{
     "m_SGVersion": 0,
     "m_Type": "UnityEditor.ShaderGraph.DynamicVectorMaterialSlot",
     "m_ObjectId": "1f0d363c43ef41e38f6f06045e8c4331",
@@ -690,7 +671,7 @@
             "m_Id": "005c7efceb3442649564f886b4fde9a8"
         },
         {
-            "m_Id": "1ea878323bfa4a8c84693464da12f273"
+            "m_Id": "bc61efdff4f945ef9b99bebf9ecd3b69"
         },
         {
             "m_Id": "50c98460d3804fbbbb9730c985431b9f"
@@ -936,6 +917,34 @@
     "m_Value": 0.0,
     "m_DefaultValue": 0.0,
     "m_Labels": []
+}
+
+{
+    "m_SGVersion": 1,
+    "m_Type": "UnityEditor.ShaderGraph.Internal.Vector1ShaderProperty",
+    "m_ObjectId": "6b4fc97e34a6432bb9fb0a98370ba556",
+    "m_Guid": {
+        "m_GuidSerialized": "1ce5f283-5508-42eb-a11f-79cd0363ae7d"
+    },
+    "m_Name": "Private: IsProbeCamera",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Private: IsProbeCamera",
+    "m_DefaultReferenceName": "_Private_IsProbeCamera",
+    "m_OverrideReferenceName": "_IsProbeCamera",
+    "m_GeneratePropertyBlock": false,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_Precision": 3,
+    "overrideHLSLDeclaration": false,
+    "hlslDeclarationOverride": 0,
+    "m_Hidden": false,
+    "m_Value": 0.0,
+    "m_FloatType": 0,
+    "m_RangeValues": {
+        "x": 0.0,
+        "y": 1.0
+    }
 }
 
 {
@@ -1188,6 +1197,9 @@
             "m_Id": "245e00b832404092a263407f23460a1b"
         },
         {
+            "m_Id": "6b4fc97e34a6432bb9fb0a98370ba556"
+        },
+        {
             "m_Id": "fbe6f837f9d34ec29b62ff4cad99e5dd"
         },
         {
@@ -1228,6 +1240,9 @@
         },
         {
             "m_Id": "b096a87e24f0466886ac847774e8e266"
+        },
+        {
+            "m_Id": "c1a31fead78d430aa48c873e54bae446"
         }
     ]
 }
@@ -1569,6 +1584,29 @@
 
 {
     "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Internal.BooleanShaderProperty",
+    "m_ObjectId": "bc61efdff4f945ef9b99bebf9ecd3b69",
+    "m_Guid": {
+        "m_GuidSerialized": "99b1f35f-4009-467d-bd53-f6b31bab22d8"
+    },
+    "m_Name": "Dithering",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Dithering",
+    "m_DefaultReferenceName": "_Dithering",
+    "m_OverrideReferenceName": "",
+    "m_GeneratePropertyBlock": true,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_Precision": 3,
+    "overrideHLSLDeclaration": false,
+    "hlslDeclarationOverride": 0,
+    "m_Hidden": false,
+    "m_Value": true
+}
+
+{
+    "m_SGVersion": 0,
     "m_Type": "UnityEditor.ShaderGraph.ScreenPositionNode",
     "m_ObjectId": "bf238976e7a047a9a1d954c5b633cc22",
     "m_Group": {
@@ -1599,6 +1637,31 @@
         "m_SerializableColors": []
     },
     "m_ScreenSpaceType": 0
+}
+
+{
+    "m_SGVersion": 1,
+    "m_Type": "UnityEditor.ShaderGraph.ShaderKeyword",
+    "m_ObjectId": "c1a31fead78d430aa48c873e54bae446",
+    "m_Guid": {
+        "m_GuidSerialized": "b82bae55-7215-4f11-adec-5c61ea0c6c65"
+    },
+    "m_Name": "Private: ForwardPlusFallback",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "Private: ForwardPlusFallback",
+    "m_DefaultReferenceName": "_PRIVATE_FORWARDPLUSFALLBACK",
+    "m_OverrideReferenceName": "_FP_REFL_PROBE_ATLAS",
+    "m_GeneratePropertyBlock": false,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_KeywordType": 0,
+    "m_KeywordDefinition": 1,
+    "m_KeywordScope": 0,
+    "m_KeywordStages": 2,
+    "m_Entries": [],
+    "m_Value": 0,
+    "m_IsEditable": true
 }
 
 {

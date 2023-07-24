@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using System.Collections.Generic;
 using Unity.Collections;
 using UnityEngine;
@@ -150,6 +151,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     private AccumulationPass m_AccumulationPass;
     private BackfaceDepthPass m_BackfaceDepthPass;
     private TransparentGBufferPass m_TransparentGBufferPass;
+    private readonly static FieldInfo renderingModeFieldInfo = typeof(UniversalRenderer).GetField("m_RenderingMode", BindingFlags.NonPublic | BindingFlags.Instance);
 
     public override void Create()
     {
@@ -232,6 +234,19 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
+        var universalRenderer = renderingData.cameraData.renderer as UniversalRenderer;
+        var renderingMode = (RenderingMode)renderingModeFieldInfo.GetValue(renderer);
+        if (renderingMode == RenderingMode.ForwardPlus)
+        {
+            m_PathTracingMaterial.EnableKeyword("_FP_REFL_PROBE_ATLAS");
+            if (renderingData.cameraData.camera.cameraType == CameraType.Reflection) { m_PathTracingMaterial.SetFloat("_IsProbeCamera", 1.0f); }
+            else { m_PathTracingMaterial.SetFloat("_IsProbeCamera", 0.0f); }
+        }
+        else
+        {
+            m_PathTracingMaterial.DisableKeyword("_FP_REFL_PROBE_ATLAS");
+            m_PathTracingMaterial.SetFloat("_IsProbeCamera", 0.0f);
+        }
         // Update accumulation mode each frame since we support runtime changing of these properties.
         m_SpatialDenoisePass.m_Accumulation = accumulation;
         m_SpatialDenoisePass.m_SpatialDenoise = spatialDenoise;
