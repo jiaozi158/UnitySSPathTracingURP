@@ -1,333 +1,10 @@
 #ifndef URP_SCREEN_SPACE_PATH_TRACING_HLSL
 #define URP_SCREEN_SPACE_PATH_TRACING_HLSL
 
-// Screen space path tracing is a screen space effect. (is it possible to fallback to hardware ray tracing when not in screen space?)
-
-// Can modify these quality presets according to your needs.
-// The unit of float values below is Unity unit (meter by default).
-//===================================================================================================================================
-// STEP_SIZE          : The ray's initial marching step size.
-//                      Increasing this may improve performance but reduce the accuracy of ray intersection test.
-//
-// MAX_STEP           : The maximum marching steps of each ray.
-//                      Increasing this may decrease performance but allows the ray to travel further. (if not decreasing STEP_SIZE)
-// 
-// RAY_BOUNCE         : The maximum number of times each ray bounces. (should be at least 1)
-//                      Increasing this may decrease performance but is necessary for recursive reflections.
-//
-// MARCHING_THICKNESS : The approximate thickness of scene objects.
-//                      This will be also be the fallback thickness when enabling "Accurate Thickness" in renderer feature.
-// 
-// RAY_BIAS           : The bias applied to ray's hit position to avoid self-intersection with hit position.
-//                      Usually no need to adjust it.
-// 
-// RAY_COUNT          : The number of rays generated per pixel. (Samples Per Pixel)
-//                      Increasing this may significantly decrease performance but will provide a more convergent result when moving camera. (less noise)
-// 
-//                      If you set this too high, the GPU Driver may restart and causing Unity to shut down. (swapchain error)
-//                      In this case, consider using Temporal-AA (in URP 15, 2023.1.0a20+) or Accumulation Renderer Feature to denoise?
-//===================================================================================================================================
-#if defined(_RAY_MARCHING_HIGH)
-    #define STEP_SIZE             0.2
-    #define MAX_STEP              64
-    #define RAY_BOUNCE            5
-#elif defined(_RAY_MARCHING_MEDIUM)
-    #define STEP_SIZE             0.25
-    #define MAX_STEP              48
-    #define RAY_BOUNCE            4
-#elif defined(_RAY_MARCHING_VERY_LOW) // If the scene is quite "reflective" or "refractive", it is recommended to keep RAY_BOUNCE as 3 (or higher) for a good look.
-    #define STEP_SIZE             0.4
-    #define MAX_STEP              12
-    #define RAY_BOUNCE            2
-#else //defined(_RAY_MARCHING_LOW)
-    #define STEP_SIZE             0.3
-    #define MAX_STEP              32
-    #define RAY_BOUNCE            3
-#endif
-// Global quality settings.
-    #define MARCHING_THICKNESS    0.15
-    #define RAY_BIAS              0.001
-    #define RAY_COUNT             1
-//===================================================================================================================================
-
-// Do not change, from URP's GBuffer hlsl.
-//===================================================================================================================================
-// Light flags (can shader graph access stencil buffer?)
-#define kLightingInvalid  -1  // No dynamic lighting: can aliase any other material type as they are skipped using stencil
-#define kLightingLit       1  // lit shader
-#define kLightingSimpleLit 2  // Simple lit shader
-#define kLightFlagSubtractiveMixedLighting    4 // The light uses subtractive mixed lighting.
-
-// Material flags (customize Lit shader to add new lighting model?)
-#define kMaterialFlagReceiveShadowsOff        1 // Does not receive dynamic shadows
-#define kMaterialFlagSpecularHighlightsOff    2 // Does not receivce specular
-#define kMaterialFlagSubtractiveMixedLighting 4 // The geometry uses subtractive mixed lighting
-#define kMaterialFlagSpecularSetup            8 // Lit material use specular setup instead of metallic setup
-
-TEXTURE2D_X_HALF(_GBuffer0); // color.rgb + materialFlags.a
-TEXTURE2D_X_HALF(_GBuffer1); // specular.rgb + oclusion.a
-TEXTURE2D_X_HALF(_GBuffer2); // normalWS.rgb + smoothness.a
-// _GBuffer3                 // indirectLighting.rgb (B10G11R11 / R16G16B16A16)
-
-// GBuffers for transparent objects (stores the first layer only)
-TEXTURE2D_X_HALF(_TransparentGBuffer0); // color.rgb + materialFlags.a
-TEXTURE2D_X_HALF(_TransparentGBuffer1); // surfaceData.rgb + surfaceType.a
-TEXTURE2D_X_HALF(_TransparentGBuffer2); // normalWS.rgb + smoothness.a
-
-TEXTURE2D_X(_CameraDepthAttachment); // CameraTransparentDepthTexture (stores the first layer only)
-
-SAMPLER(sampler_CameraDepthAttachment);
-
-// GBuffer 3 is the current render target, which means inaccessible.
-// It's also the Emission GBuffer when there's no lighting in scene.
-TEXTURE2D_X(_BlitTexture);   // indirectLighting.rgb (B10G11R11 / R16G16B16A16)
-
-SAMPLER(my_point_clamp_sampler);
-
-#if _RENDER_PASS_ENABLED
-
-#define GBUFFER0 0
-#define GBUFFER1 1
-#define GBUFFER2 2
-
-FRAMEBUFFER_INPUT_HALF(GBUFFER0);
-FRAMEBUFFER_INPUT_HALF(GBUFFER1);
-FRAMEBUFFER_INPUT_HALF(GBUFFER2);
-#endif
-
-// Reflection Probes Sampling
-#include "./PathTracingFallback.hlsl" //_with_pragmas
-
-//===================================================================================================================================
-
-// Helper functions
-//===================================================================================================================================
-TEXTURE2D_X(_CameraBackDepthTexture);
-SAMPLER(sampler_CameraBackDepthTexture);
-
-TEXTURE2D_X_HALF(_CameraBackNormalsTexture);
-
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/BRDF.hlsl"
-
-#ifndef kDielectricSpec
-#define kDielectricSpec half4(0.04, 0.04, 0.04, 1.0 - 0.04) // standard dielectric reflectivity coef at incident angle (= 4%)
-#endif
-
-uint UnpackMaterialFlags(float packedMaterialFlags)
-{
-    return uint((packedMaterialFlags * 255.0h) + 0.5h);
-}
-
-// From HDRP "RayTracingSampling.hlsl"
-// This is an implementation of the method from the paper
-// "A Low-Discrepancy Sampler that Distributes Monte Carlo Errors as a Blue Noise in Screen Space" by Heitz et al.
-float GetBNDSequenceSample(uint2 pixelCoord, uint sampleIndex, uint sampleDimension)
-{
-    // wrap arguments
-    pixelCoord = pixelCoord & 127;
-    sampleIndex = sampleIndex & 255;
-    sampleDimension = sampleDimension & 255;
-
-    // xor index based on optimized ranking
-    uint rankingIndex = (pixelCoord.x + pixelCoord.y * 128) * 8 + (sampleDimension & 7);
-    uint rankedSampleIndex = sampleIndex ^ clamp((uint)(_RankingTileXSPP[uint2(rankingIndex & 127, rankingIndex / 128)] * 256.0), 0, 255);
-
-    // fetch value in sequence
-    uint value = clamp((uint)(_OwenScrambledTexture[uint2(sampleDimension, rankedSampleIndex.x)] * 256.0), 0, 255);
-
-    // If the dimension is optimized, xor sequence value based on optimized scrambling
-    uint scramblingIndex = (pixelCoord.x + pixelCoord.y * 128) * 8 + (sampleDimension & 7);
-    float scramblingValue = min(_ScramblingTileXSPP[uint2(scramblingIndex & 127, scramblingIndex / 128)].x, 0.999);
-    value = value ^ uint(scramblingValue * 256.0);
-
-    // Convert to float (to avoid the same 1/256th quantization everywhere, we jitter by the pixel scramblingValue)
-    return (scramblingValue + value) / 256.0;
-}
-
-// Generate a random value according to the current noise method.
-// Counter is built into the function. (_Seed)
-float GenerateRandomValue(float2 screenUV)
-{
-    float time = unity_DeltaTime.y * _Time.y;
-    _Seed += 1.0;
-#if defined(_METHOD_BLUE_NOISE)
-    return GetBNDSequenceSample(uint2(screenUV * _ScreenSize.xy), time, _Seed);
-#else
-    return GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, time + _Seed));
-#endif
-}
-
-void HitSurfaceDataFromGBuffer(float2 screenUV, inout half3 albedo, inout half3 specular, inout half3 normal, inout half3 emission, inout half smoothness, inout half ior, inout half insideObject)
-{
-#if defined(_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
-    screenUV = (screenUV * 2.0 - 1.0) * _ScreenSize.zw;
-#endif
-
-    half4 transparentGBuffer1 = half4(0.0, 0.0, 0.0, 1.0);
-    uint surfaceType = 0;
-    bool isTransparentGBuffer = (insideObject != 2.0 && _SupportRefraction == 1.0);
-    UNITY_BRANCH
-    if (isTransparentGBuffer)
-    {
-        transparentGBuffer1 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer1, my_point_clamp_sampler, screenUV, 0);
-        surfaceType = UnpackMaterialFlags(transparentGBuffer1.a);
-    }
-    UNITY_BRANCH
-    if (surfaceType == 2 && isTransparentGBuffer)
-    {
-        half4 transparentGBuffer0 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer0, my_point_clamp_sampler, screenUV, 0);
-        half4 transparentGBuffer2 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer2, my_point_clamp_sampler, screenUV, 0);
-        albedo = transparentGBuffer0.rgb;
-        specular = kDieletricSpec.rgb;
-        ior = transparentGBuffer1.r * 2.0h + 0.921875h;
-        normal = transparentGBuffer2.rgb;
-        UNITY_BRANCH
-        if (_GBUFFER_NORMALS_OCT_ON == true)
-        {
-            half2 remappedOctNormalWS = half2(Unpack888ToFloat2(normal));                // values between [ 0, +1]
-            half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);          // values between [-1, +1]
-            normal = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
-        }
-        UNITY_BRANCH
-        if (insideObject == 1.0)
-        {
-            half3 backNormal = half3(0.0, 0.0, 0.0);
-            UNITY_BRANCH
-            if (_BackDepthEnabled == 2.0)
-            {
-                backNormal = SAMPLE_TEXTURE2D_X_LOD(_CameraBackNormalsTexture, my_point_clamp_sampler, screenUV, 0).rgb;
-                if (any(backNormal))
-                    normal = -backNormal;
-            }
-            else
-                normal = -normal;
-        }
-        smoothness = transparentGBuffer2.a;
-        emission = half3(0.0, 0.0, 0.0);
-
-        // Enter and exit object
-        insideObject = (insideObject == 2.0) ? 0.0 : insideObject + 1.0;
-    }
-    else
-    {
-    #if _RENDER_PASS_ENABLED // Unused
-        half4 gbuffer0 = LOAD_FRAMEBUFFER_INPUT(GBUFFER0, screenUV);
-        half4 gbuffer1 = LOAD_FRAMEBUFFER_INPUT(GBUFFER1, screenUV);
-        half4 gbuffer2 = LOAD_FRAMEBUFFER_INPUT(GBUFFER2, screenUV);
-    #else
-        // Using SAMPLE_TEXTURE2D is faster than using LOAD_TEXTURE2D on iOS platforms (5% faster shader).
-        // Possible reason: HLSLcc upcasts Load() operation to float, which doesn't happen for Sample()?
-        half4 gbuffer0 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, screenUV, 0);
-        half4 gbuffer1 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer1, my_point_clamp_sampler, screenUV, 0);
-        half4 gbuffer2 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0);
-    #endif
-        half3 gbuffer3 = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0).rgb;
-
-        bool isForward = false;
-    #if defined(_IGNORE_FORWARD_OBJECTS)
-        isForward = (gbuffer2.a == 0.0);
-    #endif
-
-        // URP does not clear color GBuffer (albedo & specular), only the depth & stencil.
-        // This can cause smearing-like artifacts.
-        albedo = isForward ? half3(0.0, 0.0, 0.0) : gbuffer0.rgb;
-
-        uint materialFlags = UnpackMaterialFlags(gbuffer0.a);
-        UNITY_BRANCH
-        if(isForward)
-            specular = half3(0.0, 0.0, 0.0);
-        else // 0.04 is the "Dieletric Specular" (kDieletricSpec.rgb)
-            specular = (materialFlags == kMaterialFlagSpecularSetup) ? gbuffer1.rgb : lerp(kDieletricSpec.rgb, max(albedo, kDieletricSpec.rgb), gbuffer1.r); // Specular & Metallic setup conversion
-        
-        normal = gbuffer2.rgb;
-        UNITY_BRANCH
-        if (_GBUFFER_NORMALS_OCT_ON == true)
-        {
-            half2 remappedOctNormalWS = half2(Unpack888ToFloat2(gbuffer2.rgb));          // values between [ 0, +1]
-            half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0);          // values between [-1, +1]
-            normal = half3(UnpackNormalOctQuadEncode(octNormalWS));                      // values between [-1, +1]
-        }       
-
-        emission = gbuffer3.rgb;
-        smoothness = gbuffer2.a;
-        ior = -1.0;
-    }
-}
-//===================================================================================================================================
-
-// position  : world space ray origin
-// direction : world space ray direction
-// energy    : color of the ray (no more than 1.0)
-struct Ray
-{
-    float3 position;
-    half3  direction;
-    half3  energy;
-};
-
-// position  : world space hit position
-// distance  : distance that ray travels
-// ...       : surfaceData of hit position
-struct RayHit
-{
-    float3 position;
-    float  distance;
-    half3  albedo;
-    half3  specular;
-    half3  normal;
-    half3  emission;
-    half   smoothness;
-    half   ior;
-    half   insideObject; // inside refraction object
-};
-
-// position : the intersection between Ray and Scene.
-// distance : the distance from Ray's starting position to intersection.
-// normal   : the normal direction of the intersection.
-// ...      : material information from GBuffer.
-RayHit InitializeRayHit()
-{
-    RayHit rayHit;
-    rayHit.position = float3(0.0, 0.0, 0.0);
-    rayHit.distance = REAL_EPS;
-    rayHit.albedo = half3(0.0, 0.0, 0.0);
-    rayHit.specular = half3(0.0, 0.0, 0.0);
-    rayHit.normal = half3(0.0, 0.0, 0.0);
-    rayHit.emission = half3(0.0, 0.0, 0.0);
-    rayHit.smoothness = 0.0;
-    rayHit.ior = -1.0;
-    rayHit.insideObject = 0.0;
-    return rayHit;
-}
-
-// [Under easiest license] Modified from "https://github.com/tuxalin/vulkanri/blob/master/examples/pbr_ibl/shaders/importanceSampleGGX.glsl".
-// GGX NDF via importance sampling
-// 
-// It modifies the normal direction based on surface smoothness.
-half3 ImportanceSampleGGX(float2 random, half3 normal, half smoothness)
-{
-    half roughness = (1.0 - smoothness); // This requires perceptual roughness, not roughness [(1.0 - smoothness) * (1.0 - smoothness)].
-    half alpha = roughness * roughness;
-    half alpha2 = alpha * alpha;
-
-    half phi = TWO_PI * random.x;
-    half cosTheta = sqrt((1.0 - random.y) / (1.0 + (alpha2 - 1.0) * random.y));
-    half sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-
-    // from spherical coordinates to cartesian coordinates
-    half3 H;
-    H.x = cos(phi) * sinTheta;
-    H.y = sin(phi) * sinTheta;
-    H.z = cosTheta;
-
-    // from tangent-space vector to world-space sample vector
-    half3 up = abs(normal.z) < 0.999 ? half3(0.0, 0.0, 1.0) : half3(1.0, 0.0, 0.0);
-    half3 tangent = normalize(cross(up, normal));
-    half3 bitangent = cross(normal, tangent);
-
-    half3 sampleVec = tangent * H.x + bitangent * H.y + normal * H.z;
-    return normalize(sampleVec);
-}
+#include "./PathTracingConfig.hlsl" // Screen Space Path Tracing Configuration
+#include "./PathTracingInput.hlsl"
+#include "./PathTracingFallback.hlsl" // Reflection Probes Sampling
+#include "./PathTracingUtilities.hlsl"
 
 // If no intersection, "rayHit.distance" will remain "REAL_EPS".
 RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance = 0.0)
@@ -335,7 +12,7 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance =
     RayHit rayHit = InitializeRayHit();
 
     // Use a small step size only when objects are close to the camera.
-    half stepSize = STEP_SIZE * lerp(0.05, 1.0, sceneDistance * 0.02);
+    half stepSize = STEP_SIZE * lerp(0.1, 1.0, sceneDistance * 0.02);
     half marchingThickness = MARCHING_THICKNESS;
     // (Safety Distance) Push the ray's marching origin to a position that is near the intersection when in first bounce.
     half accumulatedStep = 0.0;
@@ -344,9 +21,16 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance =
     //float2 lastRayPositionNDC = float2(0.0, 0.0);
     float3 lastRayPositionWS = float3(0.0, 0.0, 0.0);
     bool startBinarySearch = false;
+    bool activeSampling = true;
     UNITY_LOOP
     for (uint i = 1; i <= MAX_STEP; i++)
     {
+        if (i > MAX_SMALL_STEP && activeSampling)
+        {
+            activeSampling = false;
+            stepSize = (startBinarySearch) ? stepSize : STEP_SIZE * lerp(0.3, 1.0, sceneDistance * 0.2);
+        }
+
         accumulatedStep += stepSize + stepSize * dither;
 
         float3 rayPositionWS = ray.position + accumulatedStep * -ray.direction; // here we need viewDirectionWS
@@ -445,7 +129,8 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance =
             // Ignore the incorrect "backDepthDiff" when objects (ex. Plane with front face only) has no thickness and blocks the backface depth rendering of objects behind it.
             if ((sceneBackDepth <= sceneDepth) && backDepthValid)
             {
-                hitSuccessful = (isScreenSpace && (depthDiff <= 0.0) && (hitDepth >= sceneBackDepth) && !isSky) ? true : false;
+                // It's difficult to find the intersection of thin objects in several steps with large step sizes, so we add a minimum thickness to all objects to make it visually better.
+                hitSuccessful = (isScreenSpace && (depthDiff <= 0.0) && (hitDepth >= min(sceneBackDepth, sceneDepth - marchingThickness)) && !isSky) ? true : false;
                 isBackHit = (hitDepth > sceneBackDepth && Sign > 0.0) ? true : false;
             }
             else
@@ -475,8 +160,9 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance =
             if (Sign != FastSign(lastDepthDiff))
             {
                 // Seems that interpolating screenUV is giving worse results, so do it for positionWS only.
-                //rayPositionNDC.xy = lerp(lastRayPositionNDC, rayPositionNDC.xy, lastDepthDiff / (lastDepthDiff - depthDiff));
-                rayHit.position = lerp(lastRayPositionWS, rayHit.position, lastDepthDiff * rcp(lastDepthDiff - depthDiff));
+                float interpDepthDiff = (hitDepth < sceneBackDepth) ? backDepthDiff : depthDiff;
+                //rayPositionNDC.xy = lerp(lastRayPositionNDC, rayPositionNDC.xy, lastDepthDiff / (lastDepthDiff - interpDepthDiff));
+                rayHit.position = lerp(lastRayPositionWS, rayHit.position, lastDepthDiff * rcp(lastDepthDiff - interpDepthDiff));
             }
 
             rayHit.insideObject = insideObject;
@@ -494,20 +180,24 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half sceneDistance =
             }
             else if (isBackHit)
                 rayHit.normal = -rayHit.normal;
+
+            // Add position offset
+            rayHit.position += rayHit.normal * RAY_BIAS;
+
             break;
         }
         // [Optimization] Exponentially increase the stepSize when the ray hasn't passed through the intersection.
         // From https://blog.voxagon.se/2018/01/03/screen-space-path-tracing-diffuse.html
-        // The "1.33" is the exponential constant, which should be above "1.0".
         else if (!startBinarySearch)
         {
             // As the distance increases, the accuracy of ray intersection test becomes less important.
-            stepSize = (stepSize < STEP_SIZE) ? stepSize * 1.33 + STEP_SIZE * 0.133 : stepSize * 1.33;
-            marchingThickness *= 1.33;
+            half multiplier = lerp(1.0, 1.2, rayPositionNDC.z);
+            stepSize = stepSize * multiplier + STEP_SIZE * 0.1 * multiplier;
+            marchingThickness += MARCHING_THICKNESS * 0.25 * multiplier;
         }
 
         // Update last step's depth difference.
-        lastDepthDiff = depthDiff;
+        lastDepthDiff = (hitDepth < sceneBackDepth) ? backDepthDiff : depthDiff;
         //lastRayPositionNDC = rayPositionNDC.xy;
         lastRayPositionWS = rayPositionWS.xyz;
     }
@@ -548,7 +238,7 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirec
             {
                 ray.direction = reflect(ray.direction, rayHit.normal);
             }
-            ray.position = rayHit.position + ray.direction * RAY_BIAS;
+            ray.position = rayHit.position;
             // Absorption
             if (rayHit.insideObject == 2.0) // Exit refractive object
                 ray.energy *= rcp(refractChance) * exp(rayHit.albedo * max(rayHit.distance, 2.5)); // Artistic: add a minimum color absorption distance.
@@ -557,7 +247,7 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirec
         {
             // Specular reflection BRDF
             ray.direction = reflect(ray.direction, ImportanceSampleGGX(random.xy, rayHit.normal, rayHit.smoothness)); // Linear interpolation (lerp) doesn't match the actual specular lobes at all.
-            ray.position = rayHit.position + ray.direction * RAY_BIAS;
+            ray.position = rayHit.position;
             // BRDF * cosTheta / PDF
             // [specular / dot(N, L)] * dot(N, L) / 1.0
             ray.energy *= rcp(specChance) * rayHit.specular;
@@ -566,7 +256,7 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 random, half3 viewDirec
         {
             // Diffuse reflection BRDF
             ray.direction = SampleHemisphereCosine(random.x, random.y, rayHit.normal);
-            ray.position = rayHit.position + ray.direction * RAY_BIAS;
+            ray.position = rayHit.position;
             // BRDF * cosTheta / PDF
             // (albedo / PI) * dot(N, L) / [1.0 / (2.0 * PI)]
             ray.energy *= rcp(diffChance) * rayHit.albedo * dot(ray.direction, rayHit.normal) * 2.0;

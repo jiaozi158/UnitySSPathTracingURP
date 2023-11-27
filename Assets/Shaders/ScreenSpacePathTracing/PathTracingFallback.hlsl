@@ -284,7 +284,7 @@ half3 SampleReflectionProbes(half3 reflectVector, float3 positionWS, half mipLev
         return SampleReflectionProbesAtlas(reflectVector, positionWS, mipLevel, normalizedScreenSpaceUV);
     }
     else
-        return SampleReflectionProbesAtlas(reflectVector, positionWS, mipLevel, normalizedScreenSpaceUV);//SampleReflectionProbesCubemap(reflectVector, positionWS, mipLevel); //half3(0.0, 0.0, 0.0);
+        return SampleReflectionProbesAtlas(reflectVector, positionWS, mipLevel, normalizedScreenSpaceUV);
     #else
         return SampleReflectionProbesCubemap(reflectVector, positionWS, mipLevel);
     #endif
