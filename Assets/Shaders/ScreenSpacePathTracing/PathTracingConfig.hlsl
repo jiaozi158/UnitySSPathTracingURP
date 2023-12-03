@@ -33,22 +33,22 @@
 #if defined(_RAY_MARCHING_HIGH)
 	#define STEP_SIZE             0.2
 	#define MAX_STEP              64
-	#define MAX_SMALL_STEP        4
+	#define MAX_SMALL_STEP        12
 	#define RAY_BOUNCE            5
 #elif defined(_RAY_MARCHING_MEDIUM)
 	#define STEP_SIZE             0.25
 	#define MAX_STEP              48
-	#define MAX_SMALL_STEP        4
+	#define MAX_SMALL_STEP        8
 	#define RAY_BOUNCE            4
 #elif defined(_RAY_MARCHING_VERY_LOW) // If the scene is quite "reflective" or "refractive", it is recommended to keep RAY_BOUNCE as 3 (or higher) for a good look.
 	#define STEP_SIZE             0.4
 	#define MAX_STEP              12
-	#define MAX_SMALL_STEP        2
+	#define MAX_SMALL_STEP        3
 	#define RAY_BOUNCE            2
 #else //defined(_RAY_MARCHING_LOW)
 	#define STEP_SIZE             0.3
 	#define MAX_STEP              32
-	#define MAX_SMALL_STEP        4
+	#define MAX_SMALL_STEP        6
 	#define RAY_BOUNCE            3
 #endif
 // Global quality settings.

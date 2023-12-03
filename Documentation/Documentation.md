@@ -4,13 +4,15 @@ Documentation
 Global Setup
 -------------
 
-UnitySSPathTracingURP requires:
+UnitySSPathTracingURP supports:
 
-- Deferred rendering path in use. (OpenGL will always be in Forward, please try [Forward path support](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/ForwardPathSupport.md))
+- Deferred rendering path.
+
+- Forward or Forward+ (suggested) rendering path. (Please read [Forward path support](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/ForwardPathSupport.md))
 
  ![SetURPToDeferredPath](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/Settings/URP_DeferredPath.png)
 
-- Disable Environment Lighting if you would like Screen Space Path Tracing evaluating sky lighting.
+- Disable Environment Lighting.
 
  ![DisableEnvironmentLighting](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/Settings/DisableEnvironmentLighting.png)
 
@@ -18,7 +20,7 @@ UnitySSPathTracingURP requires:
 
  ![Setup_ScreenSpacePathTracing_RendererFeatures](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/Settings/Setup_ScreenSpacePathTracing_RendererFeatures.png)
 
-- 64 Bits HDR Precision is recomended for accumulating more samples.
+- 64 Bits HDR Precision is recomended for offline accumulating more samples.
 
 Material Setup
 -------------
@@ -29,7 +31,7 @@ Ray Marching Quality: Very Low should be enough for small scenes.
 
 Dithering: Dithering can reduce the banding artifacts in sharp reflection & refraction.
 
-Use Reflection Probe Instead: Using Reflection Probe as the environment lighting. (Need to add **"PathTracingSetReflectionProbe.cs"** to the camera)
+Use Reflection Probe Instead: Using Reflection Probe as the environment lighting. (Need to add **"PathTracingSetReflectionProbe.cs"** to the camera if not in Forward+ rendering path)
 
  ![ScreenSpacePathTracing_MaterialSettings](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/Settings/AddProbeSetter.jpg)
 
@@ -57,4 +59,4 @@ Accurate Thickness: Render the backface data of scene geometries to improve the 
 Details
 -------------
 
-For more details including custom quality settings, please see [PathTracing.hlsl](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Assets/Shaders/ScreenSpacePathTracing/PathTracing.hlsl).
+For more details including custom quality settings, please see [PathTracingConfig.hlsl](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Assets/Shaders/ScreenSpacePathTracing/PathTracingConfig.hlsl).

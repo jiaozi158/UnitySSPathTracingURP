@@ -225,4 +225,49 @@ half3 ImportanceSampleGGX(float2 random, half3 normal, half smoothness)
     return normalize(sampleVec);
 }
 
+struct GGX
+{
+    half3 direction;
+    half  weight;
+};
+
+// From HDRP
+GGX ImportanceSampleGGX_PDF(float2 screenUV, half3 normalWS, half3 viewDirWS, half smoothness)
+{
+    GGX ggx;
+
+    half roughness = (1.0 - smoothness);
+    roughness = roughness * roughness;
+
+    half3x3 localToWorld = GetLocalFrame(normalWS);
+
+    half3 sampleDir = half3(0.0, 0.0, 0.0);
+    half NdotL, NdotH, VdotH;
+    float2 random;
+
+    random.x = GenerateRandomValue(screenUV);
+    random.y = GenerateRandomValue(screenUV);
+
+    SampleGGXDir(random, viewDirWS, localToWorld, roughness, ggx.direction, NdotL, NdotH, VdotH);
+
+    // Try generating a new one if it's under the surface
+    for (int i = 1; i < 4; ++i)
+    {
+        if (dot(ggx.direction, normalWS) >= 0.0)
+            break;
+
+        random.x = GenerateRandomValue(screenUV);
+        random.y = GenerateRandomValue(screenUV);
+
+        SampleGGXDir(random, viewDirWS, localToWorld, roughness, ggx.direction, NdotL, NdotH, VdotH);
+    }
+
+    //half NdotV = dot(normalWS, viewDirWS);
+    //half Vis = V_SmithJointGGX(NdotL, NdotV, roughness);
+    //ggx.weight = roughness > 0.001 ? 4.0 * Vis * NdotL * VdotH / NdotH : 1.0;
+    ggx.weight = 1.0;
+    
+    return ggx;
+}
+
 #endif
