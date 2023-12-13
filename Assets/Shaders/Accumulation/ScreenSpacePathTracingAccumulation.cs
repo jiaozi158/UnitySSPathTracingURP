@@ -191,7 +191,12 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             // URP Upscaling is done after "AfterRenderingPostProcessing".
             // Offline: avoid PP-effects (panini projection, ...) distorting the progress bar.
             // Real-time: requires current frame Motion Vectors.
+        #if UNITY_2023_3_OR_NEWER
+            // The injection point between URP Post-processing and Final PP was fixed.
+            m_AccumulationPass.renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing - 1;
+        #else
             m_AccumulationPass.renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing;
+        #endif
         }
 
         if (m_SpatialDenoisePass == null)

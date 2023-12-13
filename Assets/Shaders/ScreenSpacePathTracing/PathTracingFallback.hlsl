@@ -14,6 +14,9 @@ half3 BoxProjectedDirection(half3 reflectVector, float3 positionWS, float3 probe
 // Forward+ Reflection Probe Atlas
 #if defined(_FP_REFL_PROBE_ATLAS)
 
+// MAX_VISIBLE_LIGHTS is moved to URP-config package (configurable by users) starts from 2023.3.
+#if UNITY_VERSION < 202330
+
 // Must match: UniversalRenderPipeline.maxVisibleAdditionalLights
 #if defined(SHADER_API_MOBILE) && (defined(SHADER_API_GLES) || defined(SHADER_API_GLES30))
 #define MAX_VISIBLE_LIGHTS 16
@@ -21,6 +24,8 @@ half3 BoxProjectedDirection(half3 reflectVector, float3 positionWS, float3 probe
 #define MAX_VISIBLE_LIGHTS 32
 #else
 #define MAX_VISIBLE_LIGHTS 256
+#endif
+
 #endif
 
 // Match with values in UniversalRenderPipeline.cs
@@ -213,14 +218,28 @@ half3 SampleReflectionProbesAtlas(half3 reflectVector, float3 positionWS, half m
         half probeMip = min(mipLevel, maxMip);
         float2 uv = saturate(PackNormalOctQuadEncode(sampleVector) * 0.5 + 0.5);
 
+        // [GL]: Flip the uv first.
+    #if !UNITY_REVERSED_Z
+        uv.y = 1.0 - uv.y;
+    #endif
+
         float mip0 = floor(probeMip);
         float mip1 = mip0 + 1;
         float mipBlend = probeMip - mip0;
         float4 scaleOffset0 = urp_ReflProbes_MipScaleOffset[probeIndex * 7 + (uint)mip0];
         float4 scaleOffset1 = urp_ReflProbes_MipScaleOffset[probeIndex * 7 + (uint)mip1];
 
-        half3 encodedIrradiance0 = half3(SAMPLE_TEXTURE2D_LOD(urp_ReflProbes_Atlas, samplerurp_ReflProbes_Atlas, uv * scaleOffset0.xy + scaleOffset0.zw, 0).rgb);
-        half3 encodedIrradiance1 = half3(SAMPLE_TEXTURE2D_LOD(urp_ReflProbes_Atlas, samplerurp_ReflProbes_Atlas, uv * scaleOffset1.xy + scaleOffset1.zw, 0).rgb);
+        float2 uv0 = uv * scaleOffset0.xy + scaleOffset0.zw;
+        float2 uv1 = uv * scaleOffset1.xy + scaleOffset1.zw;
+
+        // [GL]: Flip back after applying atlas offsets.
+    #if !UNITY_REVERSED_Z
+        uv0.y = 1.0 - uv0.y;
+        uv1.y = 1.0 - uv1.y;
+    #endif
+
+        half3 encodedIrradiance0 = half3(SAMPLE_TEXTURE2D_LOD(urp_ReflProbes_Atlas, samplerurp_ReflProbes_Atlas, uv0, 0).rgb);
+        half3 encodedIrradiance1 = half3(SAMPLE_TEXTURE2D_LOD(urp_ReflProbes_Atlas, samplerurp_ReflProbes_Atlas, uv1, 0).rgb);
         //real4 hdr = urp_ReflProbes_HDR[probeIndex];
         //irradiance += weight * DecodeHDREnvironment(lerp(encodedIrradiance0, encodedIrradiance1, mipBlend), hdr);
         //totalWeight += weight;
