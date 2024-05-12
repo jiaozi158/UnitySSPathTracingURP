@@ -75,6 +75,71 @@ MonoBehaviour:
   rounded:
     m_OverrideState: 0
     m_Value: 0
+--- !u!114 &-1575876314408238846
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0d6d1d4d11bcfd94c86688ee312adacc, type: 3}
+  m_Name: ScreenSpacePathTracing
+  m_EditorClassIdentifier: 
+  active: 1
+  state:
+    m_OverrideState: 1
+    m_Value: 1
+  maximumSamples:
+    m_OverrideState: 0
+    m_Value: 256
+  maximumDepth:
+    m_OverrideState: 0
+    m_Value: 4
+  maximumIntensity:
+    m_OverrideState: 0
+    m_Value: 10
+  samplesPerPixel:
+    m_OverrideState: 1
+    m_Value: 1
+  maximumSteps:
+    m_OverrideState: 1
+    m_Value: 32
+  stepSize:
+    m_OverrideState: 0
+    m_Value: 0.4
+  noiseMethod:
+    m_OverrideState: 0
+    m_Value: 0
+  denoiser:
+    m_OverrideState: 1
+    m_Value: 1
+  accumFactor:
+    m_OverrideState: 1
+    m_Value: 1
+  ambientStored:
+    m_OverrideState: 0
+    m_Value: 0
+  ambientIntensity:
+    m_OverrideState: 0
+    m_Value: 1
+  ambientLight:
+    m_OverrideState: 0
+    m_Value: {r: 0, g: 0, b: 0, a: 1}
+    hdr: 0
+  ambientGroundColor:
+    m_OverrideState: 0
+    m_Value: {r: 0, g: 0, b: 0, a: 1}
+    hdr: 0
+  ambientEquatorColor:
+    m_OverrideState: 0
+    m_Value: {r: 0, g: 0, b: 0, a: 1}
+    hdr: 0
+  ambientSkyColor:
+    m_OverrideState: 0
+    m_Value: {r: 0, g: 0, b: 0, a: 1}
+    hdr: 0
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -92,6 +157,7 @@ MonoBehaviour:
   - {fileID: -7893295128165547882}
   - {fileID: -7011558710299706105}
   - {fileID: 5353225732363181896}
+  - {fileID: -1575876314408238846}
 --- !u!114 &849379129802519247
 MonoBehaviour:
   m_ObjectHideFlags: 3

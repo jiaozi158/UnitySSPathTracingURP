@@ -7,7 +7,7 @@ using UnityEngine.Rendering;
 public class PathTracingSetReflectionProbe : MonoBehaviour
 {
     public Material PathTracingMaterial;
-    private const string SSPathTracingName = "Universal Render Pipeline/Screen Space Path Tracing";
+    private const string SSPathTracingName = "Hidden/Universal Render Pipeline/Screen Space Path Tracing";
     private bool isValid = false;
 
     private new MeshRenderer renderer;

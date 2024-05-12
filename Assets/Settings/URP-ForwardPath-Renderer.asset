@@ -16,10 +16,8 @@ MonoBehaviour:
     debugReplacementPS: {fileID: 4800000, guid: cf852408f2e174538bcd9b7fda1c5ae7,
       type: 3}
   m_RendererFeatures:
-  - {fileID: 7577151689894911607}
   - {fileID: 4055524452508140393}
-  - {fileID: 7248218767805662722}
-  m_RendererFeatureMap: 77de6f05517327696983a8a1001e48380246600d91d89664
+  m_RendererFeatureMap: 6983a8a1001e4838
   m_UseNativeRenderPass: 0
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
   xrSystemData: {fileID: 11400000, guid: 60e1133243b97e347b653163a8c01b64, type: 2}
@@ -71,48 +69,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2b820cae985ccda4d92fa87879a9f710, type: 3}
   m_Name: ScreenSpacePathTracingAccumulation
   m_EditorClassIdentifier: 
-  m_Active: 1
-  m_AccumulationMaterial: {fileID: 2100000, guid: a520a9b2af6fc3745bd876fdda690cc3,
-    type: 2}
+  m_Active: 0
   m_PathTracingMaterial: {fileID: 2100000, guid: a67291bbecb6c2649ba10a01f0af3ccc,
     type: 2}
   accurateThickness: 0
   refraction: 0
-  accumulation: 1
   progressBar: 1
-  temporalIntensity: 0.5
   spatialDenoise: 0
-  useOpaqueTexture: 0
---- !u!114 &7248218767805662722
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 25a99b4822eb3a6489cf756541c09390, type: 3}
-  m_Name: PathTracingForwardGBuffer
-  m_EditorClassIdentifier: 
-  m_Active: 1
-  PassEvent: 300
-  PassNames:
-  - UniversalGBuffer
---- !u!114 &7577151689894911607
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: b00045f12942b46c698459096c89274e, type: 3}
-  m_Name: Screen Space Path Tracing
-  m_EditorClassIdentifier: 
-  m_Active: 1
-  passMaterial: {fileID: 2100000, guid: a67291bbecb6c2649ba10a01f0af3ccc, type: 2}
-  injectionPoint: 450
-  requirements: 4
-  passIndex: 0

@@ -1,6 +1,8 @@
 #ifndef URP_SCREEN_SPACE_PATH_TRACING_INPUT_HLSL
 #define URP_SCREEN_SPACE_PATH_TRACING_INPUT_HLSL
 
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+
 // Do not change, from URP's GBuffer hlsl.
 //===================================================================================================================================
 // Light flags (can shader graph access stencil buffer?)
@@ -35,7 +37,7 @@ TEXTURE2D_X_HALF(_CameraBackNormalsTexture);
 
 // GBuffer 3 is the current render target, which means inaccessible.
 // It's also the Emission GBuffer when there's no lighting in scene.
-TEXTURE2D_X(_BlitTexture);   // indirectLighting.rgb (B10G11R11 / R16G16B16A16)
+//TEXTURE2D_X(_BlitTexture);   // indirectLighting.rgb (B10G11R11 / R16G16B16A16)
 
 SAMPLER(my_point_clamp_sampler);
 

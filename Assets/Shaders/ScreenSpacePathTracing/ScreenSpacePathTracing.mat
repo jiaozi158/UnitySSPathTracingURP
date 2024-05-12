@@ -8,19 +8,21 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: ScreenSpacePathTracing
-  m_Shader: {fileID: -6465566751694194690, guid: d532cf654a563054d9fac589d571c6a6,
-    type: 3}
+  m_Shader: {fileID: 4800000, guid: 9dc64644410894f449071258103d5917, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
+  - _BACKFACE_TEXTURES
   - _FP_REFL_PROBE_ATLAS
-  - _METHOD_BLUE_NOISE
-  - _RAY_MARCHING_LOW
-  - _USE_REFLECTION_PROBE
+  - _METHOD_HASHED_RANDOM
+  - _SUPPORT_REFRACTION
   m_InvalidKeywords:
   - METHOD_BLUE_NOISE
   - NOISE_BLUE_NOISE
   - _DITHERING
+  - _DITHERING_ON
+  - _RAY_MARCHING_LOW
+  - _USE_REFLECTION_PROBE
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
@@ -136,18 +138,27 @@ Material:
     - _GlossyReflections: 0
     - _IGNORE_FORWARD_OBJECTS: 0
     - _METHOD: 1
+    - _MaxBounce: 4
+    - _MaxBrightness: 10
+    - _MaxSample: 256
+    - _MaxSteps: 32
     - _Metallic: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.005
     - _QueueOffset: 0
     - _RAY_MARCHING: 1
+    - _RayCount: 1
     - _ReceiveShadows: 1
+    - _Sample: 42
+    - _Seed: 0
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
+    - _StepSize: 0.4
     - _Surface: 0
+    - _TemporalIntensity: 0.97
     - _USE_REFLECTION_PROBE: 1
     - _WorkflowMode: 1
     - _ZWrite: 1

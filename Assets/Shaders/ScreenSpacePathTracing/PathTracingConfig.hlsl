@@ -12,8 +12,12 @@
 //                      Increasing this may decrease performance but allows the ray to travel further. (if not decreasing STEP_SIZE)
 // 
 // MAX_SAMLL_STEP     : The maximum number of small steps for adaptive ray marching.
-//                      When SSPT runs out of small steps, it will use large step size to perform ray marching.
+//                      When SSPT runs out of small steps, it will use medium step size to perform ray marching.
 //                      This value should be less than MAX_STEP.
+// 
+// MAX_MEDIUM_STEP    : The maximum number of medium steps for adaptive ray marching.
+//                      When SSPT runs out of medium steps, it will use large step size to perform ray marching.
+//                      To set the medium steps to 2, you should set the "MAX_MEDIUM_STEP" to "MAX_SMALL_STEP + 2".
 // 
 // RAY_BOUNCE         : The maximum number of times each ray bounces. (should be at least 1)
 //                      Increasing this may decrease performance but is necessary for recursive reflections.
@@ -30,31 +34,62 @@
 //                      If you set this too high, the GPU Driver may restart and causing Unity to shut down. (swapchain error)
 //                      In this case, consider using Temporal-AA or Accumulation Renderer Feature to denoise.
 //===================================================================================================================================
-#if defined(_RAY_MARCHING_HIGH)
-	#define STEP_SIZE             0.2
-	#define MAX_STEP              64
-	#define MAX_SMALL_STEP        12
-	#define RAY_BOUNCE            5
-#elif defined(_RAY_MARCHING_MEDIUM)
-	#define STEP_SIZE             0.25
-	#define MAX_STEP              48
-	#define MAX_SMALL_STEP        8
-	#define RAY_BOUNCE            4
-#elif defined(_RAY_MARCHING_VERY_LOW) // If the scene is quite "reflective" or "refractive", it is recommended to keep RAY_BOUNCE as 3 (or higher) for a good look.
-	#define STEP_SIZE             0.4
-	#define MAX_STEP              12
-	#define MAX_SMALL_STEP        3
-	#define RAY_BOUNCE            2
-#else //defined(_RAY_MARCHING_LOW)
-	#define STEP_SIZE             0.3
-	#define MAX_STEP              32
-	#define MAX_SMALL_STEP        6
-	#define RAY_BOUNCE            3
-#endif
-// Global quality settings.
-	#define MARCHING_THICKNESS    0.15
-	#define RAY_BIAS              0.001
-	#define RAY_COUNT             1
+
 //===================================================================================================================================
+// Screen Space Path Tracing
+//===================================================================================================================================
+// Ray marching step counts
+	#define MAX_STEP              _MaxSteps // [Total Steps] controlled in SSPT Volume
+	#define MAX_SMALL_STEP        6
+	#define MAX_MEDIUM_STEP       MAX_SMALL_STEP + 12 // The "MAX_SMALL_STEP + 12" represents 12 medium steps
+
+// Initial size of each ray marching step (in meters)
+	#define STEP_SIZE             _StepSize // Controlled in SSPT Volume
+	#define SMALL_STEP_SIZE		  0.005
+	#define MEDIUM_STEP_SIZE	  0.1
+
+// Minimum thickness of scene objects (in meters)
+	#define MARCHING_THICKNESS				0.2
+	#define MARCHING_THICKNESS_SMALL_STEP   0.0075
+	#define MARCHING_THICKNESS_MEDIUM_STEP  0.1
+
+// The maximum bounces of each ray
+	#define RAY_BOUNCE            _MaxBounce // Controlled in SSPT Volume
+
+// Position bias to avoid self-intersecting
+	#define RAY_BIAS              0.0001
+
+// Samples per pixel
+	#define RAY_COUNT             _RayCount // Controlled in SSPT Volume
+//-----------------------------------------------------------------------------------------------------------------------------------
+
+
+
+//===================================================================================================================================
+// Temporal Accumulation (Temporal and Spatial-Temporal)
+//===================================================================================================================================
+// Maximum history samples
+	#define MAX_ACCUM_FRAME_NUM			8
+
+// For Temporal and Spatial-Temporal Accumulation
+	#define RAY_COUNT_LOW_SAMPLE  4			// The minimum number of rays to cast for pixels lacking a sufficient history of samples.
+
+// Temporal re-projection rejection threshold
+	#define MAX_REPROJECTION_DISTANCE	0.02
+	#define MAX_PIXEL_TOLERANCE			4
+	#define PROJECTION_EPSILON			0.000001
+
+// Threshold at which we decide to reject the reflection history
+	#define REFLECTION_HISTORY_REJECTION_THRESHOLD 0.75
+// Threshold at which we go from accumulation to clamping
+	#define ROUGHNESS_ACCUMULATION_THRESHOLD 0.5
+
+// SPEC_ACCUM_CURVE = 1.0 (aggressiveness of history rejection depending on viewing angle: 1 = low, 0.66 = medium, 0.5 = high)
+	#define SPEC_ACCUM_CURVE 1.0
+// SPEC_ACCUM_BASE_POWER = 0.5-1.0 (greater values lead to less aggressive accumulation)
+	#define SPEC_ACCUM_BASE_POWER 1.0
+//-----------------------------------------------------------------------------------------------------------------------------------
+
+	#define CLAMP_MAX       65472.0 // HALF_MAX minus one (2 - 2^-9) * 2^15
 
 #endif
