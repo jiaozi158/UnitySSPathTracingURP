@@ -29,7 +29,7 @@ Shader "Hidden/Universal Render Pipeline/Screen Space Path Tracing"
         Pass
         {
             Name "Screen Space Path Tracing"
-            Tags { "LightMode" = "Screen Space Path Tracing" }
+            Tags { "LightMode" = "Screen Space Path Tracing" "PreviewType" = "None" }
 
             Blend One Zero
 			
@@ -99,6 +99,8 @@ Shader "Hidden/Universal Render Pipeline/Screen Space Path Tracing"
 
             half _BackDepthEnabled;
             half _IsProbeCamera;
+
+            half _FrameIndex;
 
             // URP pre-defined the following variable on 2023.2+.
         #if UNITY_VERSION < 202320
@@ -202,6 +204,8 @@ Shader "Hidden/Universal Render Pipeline/Screen Space Path Tracing"
             half _BackDepthEnabled;
             half _IsProbeCamera;
 
+            half _FrameIndex;
+
             float4x4 _PrevInvViewProjMatrix;
             float3 _PrevCameraPositionWS;
             half _PixelSpreadAngleTangent;
@@ -218,7 +222,7 @@ Shader "Hidden/Universal Render Pipeline/Screen Space Path Tracing"
             TEXTURE2D_X(_PathTracingHistorySampleTexture);
 
             TEXTURE2D_X(_PathTracingHistoryTexture);
-            TEXTURE2D_X(_PathTracingHistoryDepthTexture);
+            TEXTURE2D_X_FLOAT(_PathTracingHistoryDepthTexture);
 
             TEXTURE2D_X(_PathTracingEmissionTexture);
             TEXTURE2D_X(_PathTracingHistoryEmissionTexture);
@@ -265,7 +269,7 @@ Shader "Hidden/Universal Render Pipeline/Screen Space Path Tracing"
             float4 _BlitTexture_TexelSize;
         #endif
 
-            TEXTURE2D_X(_CameraDepthAttachment);
+            TEXTURE2D_X_FLOAT(_CameraDepthAttachment);
 			SAMPLER(my_point_clamp_sampler);
             
             float frag(Varyings input) : SV_Target
@@ -324,14 +328,17 @@ Shader "Hidden/Universal Render Pipeline/Screen Space Path Tracing"
 				half3 color = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0).rgb;
 
 				// When object or camera moves, we should re-accumulate the pixel.
-				bool reAccumulate = (_Sample == 0.0) ? true : false;
+				bool restartAccumulation = (_Sample == 0.0) ? true : false;
 
-				if (reAccumulate)
-					return half4(color, 1.0);
-				else if (_Sample >= _MaxSample || _IsAccumulationPaused) // Do not accumulate when reaching maximum samples allowed.
-					return half4(color, 0.0);
-				else
-					return half4(color, (1.0 / (_Sample + 1.0)));
+				// Do not accumulate when reaching maximum samples allowed.
+				bool pauseAccumulation = (_Sample >= _MaxSample || _IsAccumulationPaused) ? true : false;
+
+				half finalAlpha = 1.0 / (_Sample + 1.0);
+
+				finalAlpha = restartAccumulation ? 1.0 : finalAlpha;
+				finalAlpha = pauseAccumulation ? 0.0 : finalAlpha;
+
+				return half4(color, finalAlpha);
 			}
 			ENDHLSL
 		}
@@ -432,7 +439,7 @@ Shader "Hidden/Universal Render Pipeline/Screen Space Path Tracing"
 
 			#pragma multi_compile_local_fragment _ _SUPPORT_REFRACTION // _TRANSPARENT_GBUFFERS
 
-			TEXTURE2D_X(_CameraDepthAttachment);
+			TEXTURE2D_X_FLOAT(_CameraDepthAttachment);
 
 			TEXTURE2D_X_HALF(_GBuffer0);
 			TEXTURE2D_X_HALF(_GBuffer2);
@@ -506,7 +513,7 @@ Shader "Hidden/Universal Render Pipeline/Screen Space Path Tracing"
 				};
 
 				// URP doesn't clear color targets of GBuffers, only depth and stencil.
-				float deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthAttachment, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(screenUV), 0).r;
+				float deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthAttachment, my_point_clamp_sampler, screenUV, 0).r;
 				bool isSky;
 				#if (UNITY_REVERSED_Z == 1)
 					isSky = deviceDepth == 0.0;
@@ -517,21 +524,21 @@ Shader "Hidden/Universal Render Pipeline/Screen Space Path Tracing"
 				UNITY_BRANCH
 				if (isSky)
 				{
-					return SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(screenUV), 0);
+					return SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0);
 				}
 				else
 				{
 					bool transparentGBuffers = false;
 				#if defined(_SUPPORT_REFRACTION)
-					uint surfaceType = uint((SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer1, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(screenUV), 0).a * 255.0h) + 0.5h);
+					uint surfaceType = uint((SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer1, my_point_clamp_sampler, screenUV, 0).a * 255.0h) + 0.5h);
 					transparentGBuffers = surfaceType == 2;
 				#endif
 
-					half3 centerColor = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(screenUV), 0).rgb;
+					half3 centerColor = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, screenUV, 0).rgb;
 					half3 centerEmission = half3(0.0, 0.0, 0.0);
 					UNITY_BRANCH
 					if (!transparentGBuffers)
-						centerEmission = SAMPLE_TEXTURE2D_X_LOD(_PathTracingEmissionTexture, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(screenUV), 0).rgb;
+						centerEmission = SAMPLE_TEXTURE2D_X_LOD(_PathTracingEmissionTexture, my_point_clamp_sampler, screenUV, 0).rgb;
 
 					half4 normalSmoothness;
 					half3 centerNormal;
@@ -539,17 +546,17 @@ Shader "Hidden/Universal Render Pipeline/Screen Space Path Tracing"
 					UNITY_BRANCH
 					if (transparentGBuffers)
 					{
-						normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer2, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(screenUV), 0).rgba;
+						normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer2, my_point_clamp_sampler, screenUV, 0).rgba;
 						if (!any(normalSmoothness.rgb))
-							normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(screenUV), 0).rgba;
-						centerAlbedo = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer0, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(screenUV), 0).rgb;
+							normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).rgba;
+						centerAlbedo = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer0, my_point_clamp_sampler, screenUV, 0).rgb;
 						if (!any(centerAlbedo))
-							centerAlbedo = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(screenUV), 0).rgb;
+							centerAlbedo = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, screenUV, 0).rgb;
 					}
 					else
 					{
-						normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(screenUV), 0).rgba;
-						centerAlbedo = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(screenUV), 0).rgb;
+						normalSmoothness = SAMPLE_TEXTURE2D_X_LOD(_GBuffer2, my_point_clamp_sampler, screenUV, 0).rgba;
+						centerAlbedo = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, my_point_clamp_sampler, screenUV, 0).rgb;
 					}
 
 					centerNormal = normalSmoothness.rgb;
@@ -566,7 +573,7 @@ Shader "Hidden/Universal Render Pipeline/Screen Space Path Tracing"
 					half sumWeight = half(0.0);
 					for (uint i = 0; i < 9; i++)
 					{
-						float2 uv = UnityStereoTransformScreenSpaceTex(clamp(screenUV + offset[i] * intensity * _BlitTexture_TexelSize.xy, float2(0.0, 0.0), _BlitTexture_TexelSize.zw));
+						float2 uv = clamp(screenUV + offset[i] * intensity * _BlitTexture_TexelSize.xy, float2(0.0, 0.0), _BlitTexture_TexelSize.zw);
 
 						half3 color = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, my_point_clamp_sampler, uv, 0).rgb;
 						half3 diff = centerColor - color;

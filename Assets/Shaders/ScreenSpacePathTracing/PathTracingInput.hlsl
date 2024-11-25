@@ -17,6 +17,9 @@
 #define kMaterialFlagSubtractiveMixedLighting 4 // The geometry uses subtractive mixed lighting
 #define kMaterialFlagSpecularSetup            8 // Lit material use specular setup instead of metallic setup
 
+// Path Tracing Surface Type flags
+#define kSurfaceTypeRefraction        2
+
 TEXTURE2D_X_HALF(_GBuffer0); // color.rgb + materialFlags.a
 TEXTURE2D_X_HALF(_GBuffer1); // specular.rgb + oclusion.a
 TEXTURE2D_X_HALF(_GBuffer2); // normalWS.rgb + smoothness.a
@@ -27,10 +30,10 @@ TEXTURE2D_X_HALF(_TransparentGBuffer0); // color.rgb + materialFlags.a
 TEXTURE2D_X_HALF(_TransparentGBuffer1); // surfaceData.rgb + surfaceType.a
 TEXTURE2D_X_HALF(_TransparentGBuffer2); // normalWS.rgb + smoothness.a
 
-TEXTURE2D_X(_CameraDepthAttachment); // CameraTransparentDepthTexture (stores the first layer only)
+TEXTURE2D_X_FLOAT(_CameraDepthAttachment); // CameraTransparentDepthTexture (stores the first layer only)
 SAMPLER(sampler_CameraDepthAttachment);
 
-TEXTURE2D_X(_CameraBackDepthTexture);
+TEXTURE2D_X_FLOAT(_CameraBackDepthTexture);
 SAMPLER(sampler_CameraBackDepthTexture);
 
 TEXTURE2D_X_HALF(_CameraBackNormalsTexture);

@@ -52,7 +52,7 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half3 viewDirectionW
         {
             activeSamplingMedium = false;
             // [Far] Use a small step size only when objects are close to the camera.
-            currStepSize = (startBinarySearch) ? currStepSize : stepSize * lerp(1.0, 50.0, sceneDistance);
+            currStepSize = (startBinarySearch) ? currStepSize : lerp(stepSize, 20.0, sceneDistance * 0.001);
             thickness = (startBinarySearch) ? thickness : MARCHING_THICKNESS;
             marchingThickness = MARCHING_THICKNESS;
         }
@@ -81,20 +81,20 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half3 viewDirectionW
     #if defined(_BACKFACE_TEXTURES)
         if (insideObject == 1.0 && _SupportRefraction)
             // Transparent Depth Layer 2
-            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
+            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, my_point_clamp_sampler, rayPositionNDC.xy, 0).r;
         else if (insideObject == 2.0 && _SupportRefraction)
             // Opaque Depth Layer
-            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
+            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, rayPositionNDC.xy, 0).r;
         else
             // Transparent Depth Layer 1
-            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthAttachment, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
+            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthAttachment, my_point_clamp_sampler, rayPositionNDC.xy, 0).r;
     #else
         if (insideObject != 0.0 && _SupportRefraction)
             // Opaque Depth Layer
-            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
+            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, rayPositionNDC.xy, 0).r;
         else
             // Transparent Depth Layer 1
-            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthAttachment, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
+            deviceDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthAttachment, my_point_clamp_sampler, rayPositionNDC.xy, 0).r;
     #endif
 
         // Convert Z-Depth to Linear Eye Depth
@@ -122,9 +122,9 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half3 viewDirectionW
         bool backDepthValid = false; 
     #if defined(_BACKFACE_TEXTURES)
         if (insideObject == 1.0 && _SupportRefraction)
-            deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
+            deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, my_point_clamp_sampler, rayPositionNDC.xy, 0).r;
         else
-            deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, my_point_clamp_sampler, UnityStereoTransformScreenSpaceTex(rayPositionNDC.xy), 0).r;
+            deviceBackDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraBackDepthTexture, my_point_clamp_sampler, rayPositionNDC.xy, 0).r;
         sceneBackDepth = LinearEyeDepth(deviceBackDepth, _ZBufferParams);
 
         backDepthValid = (deviceBackDepth != UNITY_RAW_FAR_CLIP_VALUE) && (sceneBackDepth >= sceneDepth);
@@ -179,7 +179,7 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half3 viewDirectionW
         if (backDepthValid)
         {
             // It's difficult to find the intersection of thin objects in several steps with large step sizes, so we add a minimum thickness to all objects to make it visually better.
-            hitSuccessful = ((depthDiff <= 0.0) && (hitDepth <= max(sceneBackDepth, sceneDepth + thickness)) && !isSky) ? true : false;
+            hitSuccessful = ((depthDiff <= 0.0) && (hitDepth <= max(sceneBackDepth, sceneDepth + currStepSize)) && !isSky) ? true : false;
             //hitSuccessful = !isSky && (isFrontRay && (depthDiff <= 0.1 && depthDiff >= -0.1) || !isFrontRay && (hitDepth <= max(sceneBackDepth , sceneDepth + MARCHING_THICKNESS) + 0.1 && hitDepth >= max(sceneBackDepth, sceneDepth + MARCHING_THICKNESS) - 0.1)) ? true : false;
             isBackHit = hitDepth > sceneBackDepth && Sign > 0.0;
         }
@@ -241,10 +241,8 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half3 viewDirectionW
         else if (!startBinarySearch)
         {
             // As the distance increases, the accuracy of ray intersection test becomes less important.
-            //half multiplier = lerp(1.0, 1.2, rayPositionNDC.z);
-            half multiplier = 1.0;
-            currStepSize = (currStepSize + currStepSize * 0.1) * multiplier;
-            marchingThickness += MARCHING_THICKNESS * 0.25 * multiplier;
+            currStepSize += currStepSize * 0.1;
+            marchingThickness += MARCHING_THICKNESS * 0.25;
         }
 
         // Update last step's depth difference.
@@ -255,32 +253,43 @@ RayHit RayMarching(Ray ray, half insideObject, half dither, half3 viewDirectionW
     return rayHit;
 }
 
-half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 positionWS, float2 screenUV, bool isBackground = false)
+half3 EvaluateBRDF(inout Ray ray, RayHit rayHit, float3 positionWS, float2 screenUV)
 {
     // If the ray intersects the scene.
     if (rayHit.distance > REAL_EPS)
     {
-        // Calculate chances of refraction, diffuse and specular reflection.
+        // Incoming Ray Direction
+        half3 viewDirectionWS = -ray.direction;
+        half NdotV = ClampNdotV(dot(rayHit.normal, viewDirectionWS));
+
+        // Probabilities of each lobe
         bool doRefraction = (rayHit.ior == -1.0) ? false : true;
-        half refractChance = doRefraction ? ReflectivitySpecular(rayHit.albedo) : 0.0;
-        half specChance = doRefraction ? 1.0 - refractChance : ReflectivitySpecular(rayHit.specular);
-        half diffChance = 1.0 - specChance - refractChance;
+        half refractProbability = doRefraction ? ReflectivitySpecular(rayHit.albedo) : 0.0;
+        half specProbability = doRefraction ? 1.0 - refractProbability : ReflectivitySpecular(max(rayHit.specular, kDieletricSpec.rgb));
+        half diffProbability = (1.0 - specProbability - refractProbability);
+
+        half perceptualRoughness = 1.0 - rayHit.smoothness;
+        half roughness = perceptualRoughness * perceptualRoughness;
+
+        float2 random = float2(GenerateRandomValue(screenUV), GenerateRandomValue(screenUV));
+        half3x3 localToWorld = GetLocalFrame(rayHit.normal);
 
         // Roulette-select the ray's path.
         half roulette = GenerateRandomValue(screenUV);
 
-        // Fresnel effect
-        half fresnel = F_Schlick(0.04, max(rayHit.smoothness, 0.04), saturate(dot(rayHit.normal, -ray.direction)));
-
+        // TODO: reimplement the refraction to match Disney BSDF
         UNITY_BRANCH
-        if (refractChance > 0.0 && roulette < refractChance)
+        if (refractProbability > 0.0 && roulette < refractProbability)
         {
             // Refraction
             rayHit.ior = rayHit.insideObject == 1.0 ? rcp(rayHit.ior) : rayHit.ior; // (air / material) : (material / air)
-            float2 random;
-            random.x = GenerateRandomValue(screenUV);
-            random.y = GenerateRandomValue(screenUV);
-            rayHit.normal = ImportanceSampleGGX(random, rayHit.normal, rayHit.smoothness);
+
+            half VdotH;
+            half NdotH;
+            SampleGGXNDF(random, viewDirectionWS, localToWorld, roughness, rayHit.normal, NdotH, VdotH);
+
+            half fresnel = F_Schlick(0.04, max(rayHit.smoothness, 0.04), VdotH);
+
             half3 refractDir = refract(ray.direction, rayHit.normal, rayHit.ior);
             // Null vector check.
             if (any(refractDir) && roulette > fresnel)
@@ -295,28 +304,55 @@ half3 EvaluateColor(inout Ray ray, RayHit rayHit, float3 positionWS, float2 scre
             ray.position = rayHit.position;
             // Absorption
             if (rayHit.insideObject == 2.0) // Exit refractive object
-                ray.energy *= rcp(max(refractChance, 0.001)) * exp(rayHit.albedo * max(rayHit.distance, 2.5)); // Artistic: add a minimum color absorption distance.
+                ray.energy *= rcp(max(refractProbability, 0.001)) * exp(rayHit.albedo * max(rayHit.distance, 2.5)); // Artistic: add a minimum color absorption distance.
             else if (rayHit.insideObject == 1.0) // apply the tint here if the ray needs to fall back to reflection probe
-                ray.energy *= rcp(max(refractChance, 0.001)) * rayHit.albedo;
+                ray.energy *= rcp(max(refractProbability, 0.001)) * rayHit.albedo;
         }
-        else if (specChance > 0.0 && roulette < specChance + fresnel)
+        else if (specProbability > 0.0 && roulette < specProbability)
         {
-            // Specular reflection BRDF
-            GGX ggx = ImportanceSampleGGX_PDF(screenUV, rayHit.normal, -ray.direction, rayHit.smoothness);
-            ray.direction = ggx.direction;
+            // Note: H is the microfacet normal direction
+
+            half VdotH;
+            half NdotL;
+            half3 L;
+            half weightOverPdf;
+
+            ImportanceSampleGGX_PDF(random, viewDirectionWS, localToWorld, roughness, NdotV, L, VdotH, NdotL, weightOverPdf);
+
+            half3 F = F_Schlick(rayHit.specular, VdotH);
+
+            // Outgoing Ray Direction
+            ray.direction = L;
             ray.position = rayHit.position;
-            // BRDF * cosTheta / PDF
-            // [specular / dot(N, L)] * dot(N, L) / 1.0
-            ray.energy *= rcp(specChance) * rayHit.specular;// * ggx.weight;
+
+            half3 brdf = F;
+
+            // Fresnel component is apply here as describe in ImportanceSampleGGX function
+            ray.energy *= rcp(specProbability) * brdf * weightOverPdf;
         }
-        else if (diffChance > 0.0 && roulette < diffChance + fresnel)
+        else if (diffProbability > 0.0 && roulette < diffProbability)
         {
-            // Diffuse reflection BRDF
-            ray.direction = SampleHemisphereCosine(GenerateRandomValue(screenUV), GenerateRandomValue(screenUV), rayHit.normal);
+            half3 L;
+            half NdotL;
+            half weightOverPdf;
+
+            // for Disney we still use a Cosine importance sampling, true Disney importance sampling imply a look up table
+            ImportanceSampleLambert(random, localToWorld, L, NdotL, weightOverPdf);
+            
+            // Outgoing Ray Direction
+            ray.direction = L;
             ray.position = rayHit.position;
-            // BRDF * cosTheta / PDF
-            // (albedo / PI) * dot(N, L) / [1.0 / (2.0 * PI)]
-            ray.energy *= rcp(diffChance) * rayHit.albedo * dot(ray.direction, rayHit.normal) * 2.0;
+
+            // For fixed luminance lighting units in URP, we don't need to do the PI division
+        #if USE_DISNEY_DIFFUSE
+            half LdotV = saturate(dot(ray.direction, viewDirectionWS));
+
+            half3 brdf = rayHit.albedo * DisneyDiffuseNoPI(NdotV, NdotL, LdotV, perceptualRoughness);
+        #else
+            half3 brdf = rayHit.albedo * LambertNoPI(); // "LambertNoPI()" is "1.0"
+        #endif
+            
+            ray.energy *= rcp(diffProbability) * brdf * weightOverPdf;
         }
         else
         {
@@ -416,7 +452,7 @@ void ScreenSpacePathTracing(float depth, float3 positionWS, float3 cameraPositio
                 roughnessBias += oldRoughness * 0.75;
 
                 // energy * emission * SPP accumulation factor
-                color += ray.energy * EvaluateColor(ray, rayHit, positionWS, screenUV, isBackground) * rcp(rayCount);
+                color += ray.energy * EvaluateBRDF(ray, rayHit, positionWS, screenUV) * rcp(rayCount);
             }
         }
 
@@ -425,7 +461,7 @@ void ScreenSpacePathTracing(float depth, float3 positionWS, float3 cameraPositio
         for (int j = 0; j < RAY_BOUNCE; j++)
         {
             half sceneDistance = rayHit.distance * 0.1;
-            depth = Linear01Depth(depth, _ZBufferParams);
+            depth = LinearEyeDepth(depth, _ZBufferParams);
             rayHit = RayMarching(ray, rayHit.insideObject, dither, viewDirectionWS, depth);
 
             // Firefly reduction
@@ -437,7 +473,7 @@ void ScreenSpacePathTracing(float depth, float3 positionWS, float3 cameraPositio
             //rayHit.smoothness = 1.0 - sqrt(modifiedRoughness);
             roughnessBias += oldRoughness * 0.75;
 
-            color += ray.energy * EvaluateColor(ray, rayHit, positionWS, screenUV) * rcp(rayCount);
+            color += ray.energy * EvaluateBRDF(ray, rayHit, positionWS, screenUV) * rcp(rayCount);
 
             if (!any(ray.energy))
                 break;
@@ -448,7 +484,7 @@ void ScreenSpacePathTracing(float depth, float3 positionWS, float3 cameraPositio
             // Survivors have their value boosted to make up for fewer samples being in the average.
             half stopRayEnergy = GenerateRandomValue(screenUV);
 
-            half maxRayEnergy = max(max(ray.energy.r, ray.energy.g), ray.energy.b);
+            half maxRayEnergy = Max3(ray.energy.r, ray.energy.g, ray.energy.b);
 
             if (maxRayEnergy < stopRayEnergy)
                 break;

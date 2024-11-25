@@ -1,9 +1,10 @@
 #ifndef URP_SCREEN_SPACE_PATH_TRACING_UTILITIES_HLSL
 #define URP_SCREEN_SPACE_PATH_TRACING_UTILITIES_HLSL
 
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/SpaceTransforms.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/BRDF.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/SpaceTransforms.hlsl"
 
 #include "./PathTracingConfig.hlsl" // Screen Space Path Tracing Configuration
 #include "./PathTracingInput.hlsl"
@@ -102,12 +103,12 @@ float GetBNDSequenceSample(uint2 pixelCoord, uint sampleIndex, uint sampleDimens
 // Counter is built into the function. (_Seed)
 float GenerateRandomValue(float2 screenUV)
 {
-    float time = unity_DeltaTime.y * _Time.y;
+    //float time = unity_DeltaTime.y * _Time.y;
     _Seed += 1.0;
 #if defined(_METHOD_BLUE_NOISE)
-    return GetBNDSequenceSample(uint2(screenUV * _ScreenSize.xy), time, _Seed);
+    return GetBNDSequenceSample(uint2(screenUV * _ScreenSize.xy), _FrameIndex, _Seed);
 #else
-    return GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, time + _Seed));
+    return GenerateHashedRandomFloat(uint3(screenUV * _ScreenSize.xy, _FrameIndex + _Seed));
 #endif
 }
 
@@ -127,7 +128,7 @@ void HitSurfaceDataFromGBuffer(float2 screenUV, inout RayHit rayHit)
         surfaceType = UnpackMaterialFlags(transparentGBuffer1.a);
     }
     UNITY_BRANCH
-    if (surfaceType == 2 && isTransparentGBuffer)
+    if (surfaceType == kSurfaceTypeRefraction && isTransparentGBuffer)
     {
         half4 transparentGBuffer0 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer0, my_point_clamp_sampler, screenUV, 0);
         half4 transparentGBuffer2 = SAMPLE_TEXTURE2D_X_LOD(_TransparentGBuffer2, my_point_clamp_sampler, screenUV, 0);
@@ -193,7 +194,7 @@ void HitSurfaceDataFromGBuffer(float2 screenUV, inout RayHit rayHit)
         if(isForward)
             rayHit.specular = half3(0.0, 0.0, 0.0);
         else // 0.04 is the "Dieletric Specular" (kDieletricSpec.rgb)
-            rayHit.specular = (materialFlags == kMaterialFlagSpecularSetup) ? gbuffer1.rgb : lerp(kDieletricSpec.rgb, max(rayHit.albedo, kDieletricSpec.rgb), gbuffer1.r); // Specular & Metallic setup conversion
+            rayHit.specular = (materialFlags == kMaterialFlagSpecularSetup) ? gbuffer1.rgb : lerp(kDieletricSpec.rgb, rayHit.albedo, gbuffer1.r); // Specular & Metallic setup conversion
         
         rayHit.normal = gbuffer2.rgb;
         
@@ -210,77 +211,72 @@ void HitSurfaceDataFromGBuffer(float2 screenUV, inout RayHit rayHit)
 }
 //===================================================================================================================================
 
-// [Under easiest license] Modified from "https://github.com/tuxalin/vulkanri/blob/master/examples/pbr_ibl/shaders/importanceSampleGGX.glsl".
-// GGX NDF via importance sampling
-// 
-// It modifies the normal direction based on surface smoothness.
-half3 ImportanceSampleGGX(float2 random, half3 normal, half smoothness)
+void SampleGGXNDF(float2   u,
+    half3   V,
+    half3x3 localToWorld,
+    half    roughness,
+    out half3   H,
+    out half    NdotH,
+    out half    VdotH,
+    bool    VeqN = false)
 {
-    half roughness = (1.0 - smoothness); // This requires perceptual roughness, not roughness [(1.0 - smoothness) * (1.0 - smoothness)].
-    half alpha = roughness * roughness;
-    half alpha2 = alpha * alpha;
+    // GGX NDF sampling
+    half cosTheta = sqrt(SafeDiv(1.0 - u.x, 1.0 + (roughness * roughness - 1.0) * u.x));
+    half phi = TWO_PI * u.y;
 
-    half phi = TWO_PI * random.x;
-    half cosTheta = sqrt((1.0 - random.y) / (1.0 + (alpha2 - 1.0) * random.y));
-    half sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    half3 localH = SphericalToCartesian(phi, cosTheta);
 
-    // from spherical coordinates to cartesian coordinates
-    half3 H;
-    H.x = cos(phi) * sinTheta;
-    H.y = sin(phi) * sinTheta;
-    H.z = cosTheta;
+    NdotH = cosTheta;
 
-    // from tangent-space vector to world-space sample vector
-    half3 up = abs(normal.z) < 0.999 ? half3(0.0, 0.0, 1.0) : half3(1.0, 0.0, 0.0);
-    half3 tangent = normalize(cross(up, normal));
-    half3 bitangent = cross(normal, tangent);
+    half3 localV;
 
-    half3 sampleVec = tangent * H.x + bitangent * H.y + normal * H.z;
-    return normalize(sampleVec);
-}
-
-struct GGX
-{
-    half3 direction;
-    half  weight;
-};
-
-// From HDRP
-GGX ImportanceSampleGGX_PDF(float2 screenUV, half3 normalWS, half3 viewDirWS, half smoothness)
-{
-    GGX ggx;
-
-    half roughness = (1.0 - smoothness);
-    roughness = roughness * roughness;
-
-    half3x3 localToWorld = GetLocalFrame(normalWS);
-
-    half3 sampleDir = half3(0.0, 0.0, 0.0);
-    half NdotL, NdotH, VdotH;
-    float2 random;
-
-    random.x = GenerateRandomValue(screenUV);
-    random.y = GenerateRandomValue(screenUV);
-
-    SampleGGXDir(random, viewDirWS, localToWorld, roughness, ggx.direction, NdotL, NdotH, VdotH);
-
-    // Try generating a new one if it's under the surface
-    for (int i = 1; i < 4; ++i)
+    if (VeqN)
     {
-        if (dot(ggx.direction, normalWS) >= 0.0)
-            break;
-
-        random.x = GenerateRandomValue(screenUV);
-        random.y = GenerateRandomValue(screenUV);
-
-        SampleGGXDir(random, viewDirWS, localToWorld, roughness, ggx.direction, NdotL, NdotH, VdotH);
+        // localV == localN
+        localV = half3(0.0, 0.0, 1.0);
+        VdotH = NdotH;
+    }
+    else
+    {
+        localV = mul(V, transpose(localToWorld));
+        VdotH = saturate(dot(localV, localH));
     }
 
-    half NdotV = dot(normalWS, viewDirWS);
+    // Compute { localL = reflect(-localV, localH) }
+    //half3 localL = -localV + 2.0 * VdotH * localH;
+    //NdotL = localL.z;
+
+    H = mul(localH, localToWorld);
+    //L = mul(localL, localToWorld);
+}
+
+void ImportanceSampleGGX_PDF(float2   u,
+    half3   V,
+    half3x3 localToWorld,
+    half    roughness,
+    half    NdotV,
+    out half3   L,
+    out half    VdotH,
+    out half    NdotL,
+    out half    weightOverPdf)
+{
+    half NdotH;
+    SampleGGXDir(u, V, localToWorld, roughness, L, NdotL, NdotH, VdotH);
+
+    // TODO: should we generate a new sample if NdotL is negative?
+    NdotL = saturate(NdotL);
+
+    // Importance sampling weight for each sample
+    // pdf = D(H) * (N.H) / (4 * (L.H))
+    // weight = fr * (N.L) with fr = F(H) * G(V, L) * D(H) / (4 * (N.L) * (N.V))
+    // weight over pdf is:
+    // weightOverPdf = F(H) * G(V, L) * (L.H) / ((N.H) * (N.V))
+    // weightOverPdf = F(H) * 4 * (N.L) * V(V, L) * (L.H) / (N.H) with V(V, L) = G(V, L) / (4 * (N.L) * (N.V))
+    // Remind (L.H) == (V.H)
+    // F is apply outside the function
+
     half Vis = V_SmithJointGGX(NdotL, NdotV, roughness);
-    ggx.weight = roughness > 0.001 ? 4.0 * Vis * NdotL * VdotH / NdotH : 1.0;
-    
-    return ggx;
+    weightOverPdf = (roughness > 0.001 && NdotH > 0.0) ? 4.0 * Vis * NdotL * VdotH / NdotH : 1.0;
 }
 
 #endif

@@ -214,8 +214,10 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     private static readonly int _PrevInvViewProjMatrix = Shader.PropertyToID("_PrevInvViewProjMatrix");
     private static readonly int _PrevCameraPositionWS = Shader.PropertyToID("_PrevCameraPositionWS");
     private static readonly int _PixelSpreadAngleTangent = Shader.PropertyToID("_PixelSpreadAngleTangent");
-    
+    private static readonly int _FrameIndex = Shader.PropertyToID("_FrameIndex");
+
     private static readonly int _PathTracingEmissionTexture = Shader.PropertyToID("_PathTracingEmissionTexture");
+    private static readonly int _CameraDepthTexture = Shader.PropertyToID("_CameraDepthTexture");
     private static readonly int _CameraDepthAttachment = Shader.PropertyToID("_CameraDepthAttachment");
     private static readonly int _CameraBackDepthTexture = Shader.PropertyToID("_CameraBackDepthTexture");
     private static readonly int _CameraBackNormalsTexture = Shader.PropertyToID("_CameraBackNormalsTexture");
@@ -517,10 +519,14 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     public class PathTracingPass : ScriptableRenderPass
     {
         const string m_ProfilerTag = "Screen Space Path Tracing";
+        private readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(m_ProfilerTag);
 
         public Material m_PathTracingMaterial;
         private RTHandle sourceHandle;
-        
+
+        // Time
+        private int frameCount = 0;
+
         public PathTracingPass(Material material)
         {
             m_PathTracingMaterial = material;
@@ -532,7 +538,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             RTHandle colorHandle = renderingData.cameraData.renderer.cameraColorTargetHandle;
 
             CommandBuffer cmd = CommandBufferPool.Get();
-            using (new ProfilingScope(cmd, new ProfilingSampler(m_ProfilerTag)))
+            using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
                 Blitter.BlitCameraTexture(cmd, colorHandle, sourceHandle);
                 Blitter.BlitCameraTexture(cmd, sourceHandle, colorHandle, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store, m_PathTracingMaterial, pass: 0);
@@ -544,6 +550,10 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
+            m_PathTracingMaterial.SetFloat(_FrameIndex, frameCount);
+            frameCount += 33;
+            frameCount %= 64000;
+
             RenderTextureDescriptor desc = renderingData.cameraData.cameraTargetDescriptor;
             desc.depthBufferBits = 0; // Color and depth cannot be combined in RTHandles
             desc.stencilFormat = GraphicsFormat.None;
@@ -569,13 +579,38 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
             internal TextureHandle cameraColorTargetHandle;
             internal TextureHandle cameraDepthTargetHandle;
+            internal TextureHandle cameraDepthTextureHandle;
             internal TextureHandle emissionHandle;
+
+            // GBuffers created by URP
+            internal bool localGBuffers;
+            internal TextureHandle gBuffer0Handle;
+            internal TextureHandle gBuffer1Handle;
+            internal TextureHandle gBuffer2Handle;
         }
 
         // This static method is used to execute the pass and passed as the RenderFunc delegate to the RenderGraph render pass
         static void ExecutePass(PassData data, UnsafeGraphContext context)
         {
             CommandBuffer cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+
+            if (data.cameraDepthTextureHandle.IsValid())
+                data.pathTracingMaterial.SetTexture(_CameraDepthTexture, data.cameraDepthTextureHandle);
+
+            if (data.localGBuffers)
+            {
+                data.pathTracingMaterial.SetTexture(_GBuffer0, data.gBuffer0Handle);
+                data.pathTracingMaterial.SetTexture(_GBuffer1, data.gBuffer1Handle);
+                data.pathTracingMaterial.SetTexture(_GBuffer2, data.gBuffer2Handle);
+            }
+            else
+            {
+                // Global gbuffer textures
+                data.pathTracingMaterial.SetTexture(_GBuffer0, null);
+                data.pathTracingMaterial.SetTexture(_GBuffer1, null);
+                data.pathTracingMaterial.SetTexture(_GBuffer2, null);
+            }
+
             data.pathTracingMaterial.SetTexture(_CameraDepthAttachment, data.cameraDepthTargetHandle);
             data.pathTracingMaterial.SetTexture(_PathTracingEmissionTexture, data.emissionHandle);
 
@@ -595,6 +630,10 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
                 // The active color and depth textures are the main color and depth buffers that the camera renders into
                 UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
                 UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+
+                m_PathTracingMaterial.SetFloat(_FrameIndex, frameCount);
+                frameCount += 33;
+                frameCount %= 64000;
 
                 RenderTextureDescriptor desc = cameraData.cameraTargetDescriptor;
                 desc.depthBufferBits = 0; // Color and depth cannot be combined in RTHandles
@@ -616,6 +655,19 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
                 builder.UseTexture(passData.cameraColorTargetHandle, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.cameraDepthTargetHandle, AccessFlags.Write);
                 builder.UseTexture(passData.emissionHandle, AccessFlags.ReadWrite);
+
+                passData.localGBuffers = resourceData.gBuffer[0].IsValid();
+
+                if (passData.localGBuffers)
+                {
+                    passData.gBuffer0Handle = resourceData.gBuffer[0];
+                    passData.gBuffer1Handle = resourceData.gBuffer[1];
+                    passData.gBuffer2Handle = resourceData.gBuffer[2];
+
+                    builder.UseTexture(passData.gBuffer0Handle, AccessFlags.Read);
+                    builder.UseTexture(passData.gBuffer1Handle, AccessFlags.Read);
+                    builder.UseTexture(passData.gBuffer2Handle, AccessFlags.Read);
+                }
 
                 // We disable culling for this pass for the demonstrative purpose of this sample, as normally this pass would be culled,
                 // since the destination texture is not used anywhere else
@@ -640,6 +692,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     public class AccumulationPass : ScriptableRenderPass
     {
         const string m_ProfilerTag = "Path Tracing Accumulation";
+        private readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(m_ProfilerTag);
 
         // Curren Sample
         public int sample = 0;
@@ -670,6 +723,10 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
         private Matrix4x4 prevCamInvVPMatrix;
         private Vector3 prevCameraPositionWS;
+
+    #if UNITY_EDITOR
+        private bool prevPlayState;
+    #endif
 
         public AccumulationPass(Material pathTracingMaterial, bool progressBar)
         {
@@ -735,7 +792,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             CommandBuffer cmd = CommandBufferPool.Get();
-            using (new ProfilingScope(cmd, new ProfilingSampler(m_ProfilerTag)))
+            using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
                 if (m_Accumulation == Accumulation.Camera)
                 {
@@ -757,6 +814,8 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
                     m_PathTracingMaterial.SetFloat(_MaxSample, maxSample);
                     bool isPaused = false;
                 #if UNITY_EDITOR
+                    if (prevPlayState != UnityEditor.EditorApplication.isPlaying) { sample = 0; }
+                    prevPlayState = UnityEditor.EditorApplication.isPlaying;
                     isPaused = UnityEditor.EditorApplication.isPlaying && UnityEditor.EditorApplication.isPaused;
                 #endif
                     m_PathTracingMaterial.SetFloat(_IsAccumulationPaused, isPaused ? 1.0f : 0.0f);
@@ -1035,6 +1094,8 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
                     m_PathTracingMaterial.SetFloat(_MaxSample, maxSample);
                     bool isPaused = false;
                 #if UNITY_EDITOR
+                    if (prevPlayState != UnityEditor.EditorApplication.isPlaying) { sample = 0; }
+                    prevPlayState = UnityEditor.EditorApplication.isPlaying;
                     isPaused = UnityEditor.EditorApplication.isPlaying && UnityEditor.EditorApplication.isPaused;
                 #endif
                     m_PathTracingMaterial.SetFloat(_IsAccumulationPaused, isPaused ? 1.0f : 0.0f);
@@ -1164,6 +1225,9 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
 
     public class BackfaceDepthPass : ScriptableRenderPass
     {
+        const string m_ProfilerTag = "Path Tracing Backface Data";
+        private readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(m_ProfilerTag);
+
         private RTHandle m_BackDepthHandle;
         private RTHandle m_BackNormalsHandle;
         public AccurateThickness m_AccurateThickness;
@@ -1225,7 +1289,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             // Render backface depth
             if (m_AccurateThickness == AccurateThickness.DepthOnly)
             {
-                using (new ProfilingScope(cmd, new ProfilingSampler("Path Tracing Backface Depth")))
+                using (new ProfilingScope(cmd, m_ProfilingSampler))
                 {
                     RendererListDesc rendererListDesc = new RendererListDesc(new ShaderTagId("DepthOnly"), renderingData.cullResults, renderingData.cameraData.camera);
                     m_DepthRenderStateBlock.depthState = new DepthState(true, CompareFunction.LessEqual);
@@ -1243,7 +1307,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             // Render backface depth + normals
             else if (m_AccurateThickness == AccurateThickness.DepthNormals)
             {
-                using (new ProfilingScope(cmd, new ProfilingSampler("Path Tracing Backface Depth Normals")))
+                using (new ProfilingScope(cmd, m_ProfilingSampler))
                 {
                     RendererListDesc rendererListDesc = new RendererListDesc(new ShaderTagId("DepthNormals"), renderingData.cullResults, renderingData.cameraData.camera);
                     m_DepthRenderStateBlock.depthState = new DepthState(true, CompareFunction.LessEqual);
@@ -1283,7 +1347,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             // add a raster render pass to the render graph, specifying the name and the data type that will be passed to the ExecutePass function
-            using (var builder = renderGraph.AddRasterRenderPass<PassData>("Path Tracing Backface Data", out var passData))
+            using (var builder = renderGraph.AddRasterRenderPass<PassData>(m_ProfilerTag, out var passData))
             {
                 // UniversalResourceData contains all the texture handles used by the renderer, including the active color and depth textures
                 // The active color and depth textures are the main color and depth buffers that the camera renders into
@@ -1394,6 +1458,8 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     public class TransparentGBufferPass : ScriptableRenderPass
     {
         const string m_ProfilerTag = "Path Tracing Transparent GBuffer";
+        private readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(m_ProfilerTag);
+
         private List<ShaderTagId> m_ShaderTagIdList = new List<ShaderTagId>();
         private FilteringSettings m_filter;
 
@@ -1444,7 +1510,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             SortingCriteria sortingCriteria = renderingData.cameraData.defaultOpaqueSortFlags;
 
             CommandBuffer cmd = CommandBufferPool.Get();
-            using (new ProfilingScope(cmd, new ProfilingSampler(m_ProfilerTag)))
+            using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
                 RendererListDesc rendererListDesc = new RendererListDesc(m_ShaderTagIdList[0], renderingData.cullResults, renderingData.cameraData.camera);
                 rendererListDesc.stateBlock = m_RenderStateBlock;
@@ -1697,6 +1763,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
     public class ForwardGBufferPass : ScriptableRenderPass
     {
         const string m_ProfilerTag = "Path Tracing Forward GBuffer";
+        private readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(m_ProfilerTag);
 
         private List<ShaderTagId> m_ShaderTagIdList = new List<ShaderTagId>();
         private FilteringSettings m_filter;
@@ -1748,7 +1815,7 @@ public class ScreenSpacePathTracingAccumulation : ScriptableRendererFeature
             SortingCriteria sortingCriteria = renderingData.cameraData.defaultOpaqueSortFlags;
 
             CommandBuffer cmd = CommandBufferPool.Get();
-            using (new ProfilingScope(cmd, new ProfilingSampler(m_ProfilerTag)))
+            using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
                 RendererListDesc rendererListDesc = new RendererListDesc(m_ShaderTagIdList[0], renderingData.cullResults, renderingData.cameraData.camera);
                 rendererListDesc.stateBlock = m_RenderStateBlock;

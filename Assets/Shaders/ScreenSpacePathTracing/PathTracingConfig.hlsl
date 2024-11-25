@@ -49,7 +49,7 @@
 	#define MEDIUM_STEP_SIZE	  0.1
 
 // Minimum thickness of scene objects (in meters)
-	#define MARCHING_THICKNESS				0.2
+	#define MARCHING_THICKNESS				0.4
 	#define MARCHING_THICKNESS_SMALL_STEP   0.0075
 	#define MARCHING_THICKNESS_MEDIUM_STEP  0.1
 
@@ -63,7 +63,12 @@
 	#define RAY_COUNT             _RayCount // Controlled in SSPT Volume
 //-----------------------------------------------------------------------------------------------------------------------------------
 
+//===================================================================================================================================
+// Rendering Settings
+//===================================================================================================================================
 
+// Lambert or Disney Diffuse BRDF
+    #define USE_DISNEY_DIFFUSE (1)
 
 //===================================================================================================================================
 // Temporal Accumulation (Temporal and Spatial-Temporal)

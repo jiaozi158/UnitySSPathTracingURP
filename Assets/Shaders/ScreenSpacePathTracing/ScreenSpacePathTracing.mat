@@ -140,7 +140,7 @@ Material:
     - _METHOD: 1
     - _MaxBounce: 4
     - _MaxBrightness: 10
-    - _MaxSample: 256
+    - _MaxSample: 512
     - _MaxSteps: 32
     - _Metallic: 0
     - _OcclusionStrength: 1

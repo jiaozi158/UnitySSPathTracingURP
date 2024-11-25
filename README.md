@@ -3,10 +3,6 @@ UnitySSPathTracingURP
 
  Screen Space Path Tracing for Unity's URP (Universal Render Pipeline).
 
- This shader is created in Shader Graph with the new URP 14 Full Screen Pass Renderer Feature.
-
- This effect seems to be usable (stability, speed & noisiness) when I tested it on mobile device, so I decide to share it.
-
  **Please read the Documentation and Requirements before using this repository.**
  
 Screenshots
@@ -17,6 +13,7 @@ Screenshots
 
  ![ProbeFallBackOn2](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/ProbeFallBack2.jpg)
 
+<!-- 
  ![ProbeFallBackOn3](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/EmissionFromReflectionProbe.jpg)
 
 Offline Accumulation
@@ -28,6 +25,7 @@ Real-time Accumulation
  ![Moving](https://github.com/jiaozi158/UnitySSPathTracingURP/blob/main/Documentation/Images/BoxScene/URP_ScreenSpacePathTracing_Moving.jpg)
 
  **Note:** Enable URP Temporal Anti-aliasing is important for improving stability. (exists since latest URP 14)
+-->
 
 **(Not Included)**
 
